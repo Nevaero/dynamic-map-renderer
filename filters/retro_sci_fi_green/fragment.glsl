@@ -1,5 +1,5 @@
 // filters/retro_sci_fi_green/fragment.glsl
-// Version: 1.8
+// Version: 1.32 (Original Tint Last + Input Clamping)
 #ifdef GL_ES
 precision mediump float;
 #endif
@@ -7,152 +7,144 @@ precision mediump float;
 uniform sampler2D mapTexture;
 // Filter uniforms
 uniform float uScanlineIntensity;
-uniform float uStaticAmount;
+uniform float uScanlineThickness;
 uniform float uCrtWarp;
 uniform float uBrightness;
 uniform float uContrast;
-uniform float uGreenTint; // Specific to this version
+uniform float uGreenTint;
+uniform float uGhostIntensity;
+uniform float uGhostDistance;
+uniform float uTearFrequency;
+uniform float uNoiseBarWidth;
+uniform float uNoiseBarSpeed;
+// Removed: uniform float uNoiseBarSkewAmount;
 uniform float uVignetteAmount;
 uniform float uInvertColors;
 uniform float uFlicker;
 uniform float uPictureRoll;
 uniform float uDistortion;
-uniform float uInterference;
-uniform float uSkew;
+uniform float uInterference; // White Noise
+uniform float uSkew; // General picture skew
 uniform float uChromaticAberration;
-uniform float uHumBarIntensity;
 uniform float uRoundedCorners;
-uniform float uWobbleSpeed;
-uniform float uWobbleFrequency;
-uniform float uWobbleAmplitude;
 // System uniforms
 uniform vec2 resolution;
 uniform float time;
 
-varying vec2 vUv; // Original UV from vertex shader
+varying vec2 vUv; // Original UV passed from vertex shader
+
+#define PI 3.1415926
 
 // Simple pseudo-random noise function
 float random(vec2 st) {
     return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
 }
 
-// --- Effect Functions ---
-float scanline(vec2 screenCoord, float intensity) {
-    float lineFactor = mod(screenCoord.y * 0.5, 2.0);
-    return 1.0 - smoothstep(0.9, 1.1, lineFactor) * intensity;
-}
+// --- Effect Functions --- (scanline, vignette, barrelDistortion, roundedCornerSDFMask - unchanged)
+float scanline(vec2 screenCoord, float intensity, float thickness) { float cycleHeight = max(thickness, 1.0); float lineFactor = mod(screenCoord.y, cycleHeight); float lineCenter = cycleHeight * 0.5; float darkLineHalfWidth = cycleHeight * 0.25; float dist = abs(lineFactor - lineCenter); float lineValue = step(darkLineHalfWidth, dist); return mix(1.0 - intensity, 1.0, lineValue); }
+float vignette(vec2 uv, float amount) { uv = uv - 0.5; float radius = 0.75 - amount * 0.4; float softness = 0.4; return smoothstep(radius + softness, radius - softness, length(uv)); }
+vec2 barrelDistortion(vec2 uv, float amount) { vec2 centeredUv = uv * 2.0 - 1.0; float distSq = dot(centeredUv, centeredUv); vec2 warpedUv = centeredUv * (1.0 + amount * distSq); return (warpedUv + 1.0) / 2.0; }
+float roundedCornerSDFMask(vec2 uv, float radius) { vec2 p = uv - 0.5; vec2 b = vec2(0.5 - radius); float d = length(max(abs(p) - b, 0.0)) - radius; return 1.0 - smoothstep(-0.005, 0.005, d); }
 
-float vignette(vec2 uv, float amount) {
-     uv = uv - 0.5;
-     float radius = 0.75 - amount * 0.4;
-     float softness = 0.4;
-     return smoothstep(radius + softness, radius - softness, length(uv));
-}
 
-vec2 barrelDistortion(vec2 uv, float amount) {
-    vec2 centeredUv = uv * 2.0 - 1.0;
-    float distSq = dot(centeredUv, centeredUv);
-    vec2 warpedUv = centeredUv * (1.0 + amount * distSq);
-    return (warpedUv + 1.0) / 2.0;
-}
+// --- Helper Function to Apply Effects ---
+// Added flags for noise bar state
+vec3 processColor(vec3 aberrColor, vec2 screenCoord, vec2 baseUv, bool isInsideNoiseBar, float posInBar) {
+    vec3 processed = aberrColor;
 
-float roundedCornerSDFMask(vec2 uv, float radius) {
-    vec2 p = uv - 0.5;
-    vec2 b = vec2(0.5 - radius);
-    float d = length(max(abs(p) - b, 0.0)) - radius;
-    return 1.0 - smoothstep(-0.005, 0.005, d);
+    // Apply Invert (First)
+    if (uInvertColors > 0.5) { processed = vec3(1.0) - processed; }
+
+    // NOTE: Early tint removed
+
+    // Apply Brightness/Contrast
+    processed = (processed - 0.5) * uContrast + 0.5;
+    processed = processed * uBrightness;
+
+    // Apply Scanlines
+    float scan = scanline(screenCoord, uScanlineIntensity, uScanlineThickness);
+    processed *= scan;
+
+    // Apply Interference (White Noise)
+    float interferenceNoise = random(baseUv * 0.6 + time * 0.05);
+    float interferenceFactor = smoothstep(0.75 - uInterference * 0.2, 0.75 + uInterference * 0.2, interferenceNoise);
+    processed += interferenceFactor * uInterference * vec3(0.95);
+
+    // --- Add Denser Black & White Staticky Streaks within Noise Bar ---
+    if (isInsideNoiseBar) {
+        float lineSeed = random(vec2(floor(baseUv.y * 200.0), floor(time*30.0)));
+        float intensityX = random(vec2(lineSeed, 3.3)) * 1.5 + 0.3;
+        float streakProbability = 0.25;
+        float streakNoise = random(baseUv.xy * vec2(15.0, 5.0) + vec2(lineSeed, time * 25.0));
+        if (streakNoise < streakProbability) {
+             float blackOrWhite = random(vec2(lineSeed, 4.4));
+             vec3 streakColor = (blackOrWhite > 0.5) ? vec3(1.0) : vec3(0.0); // White or Black
+             float mixFactor = intensityX * (1.0 - posInBar * 0.5);
+             mixFactor = clamp(mixFactor, 0.0, 1.0);
+             processed = mix(processed, streakColor, mixFactor);
+        }
+    }
+    // --- End Staticky Streaks ---
+
+    // Apply Flicker
+    float flickerAmount = (random(vec2(time * 8.0)) - 0.5) * uFlicker;
+    processed += flickerAmount;
+
+    // --- Clamp color before final tint to mitigate purple artifact ---
+    processed = clamp(processed, 0.01, 0.99); // Prevent pure black/white input to tint
+
+    // Apply Original Complex Tint (LAST effect in this function)
+    if (uGreenTint > 0.0) {
+        float t = uGreenTint;
+        // Original formula: Reduce R & B differently, boost G slightly
+        vec3 tinted = vec3(
+            processed.r * (1.0 - t * 0.8),
+            processed.g, // G is boosted below
+            processed.b * (1.0 - t * 0.6)
+        );
+        tinted.g = min(processed.g * (1.0 + t * 0.1), 1.0); // Apply boost using original green
+        processed = tinted;
+    }
+    // --- Tint Applied ---
+
+    return processed;
 }
 
 
 void main() {
-     // --- 1. Calculate final UV coordinates for sampling ---
-     vec2 finalUv = vUv;
+      // --- 1. Calculate final UV coordinates (Main and Ghost) ---
+      vec2 warpedUv = barrelDistortion(vUv, uCrtWarp); vec2 finalUv = warpedUv;
+      finalUv.y = fract(finalUv.y + time * uPictureRoll); finalUv.x += (finalUv.y - 0.5) * uSkew; float distortionOffset = (random(vec2(finalUv.y * 15.0, time * 0.4)) - 0.5) * uDistortion; finalUv.x += distortionOffset;
+      // Apply Intermittent Tearing
+      bool tearActive = false; float basePeriod = uTearFrequency; if (basePeriod > 0.01) { float cycleNum = floor(time / basePeriod); float randomOffset = (random(vec2(cycleNum)) - 0.5) * basePeriod; float triggerTime = (cycleNum * basePeriod) + randomOffset + (basePeriod * 0.5); float effectDuration = 0.2; if (abs(time - triggerTime) < (effectDuration * 0.5)) { tearActive = true; } }
+      if (tearActive) { float tearStrength = 0.08; float spatialFrequency = 15.0; float sharpness = 40.0; float scrollSpeed = 5.0; float scrollOffset = fract(time * scrollSpeed); float yPos = finalUv.y + scrollOffset; float v_wave = 0.5 - 0.5 * cos(2.0 * PI * yPos * spatialFrequency); float v_pow = pow(v_wave, sharpness); float v_sin = sin(2.0 * PI * yPos * spatialFrequency); float v = v_pow * v_sin; finalUv.x += v * tearStrength; }
+      // Calculate Noise Bar State & Apply UV Skew
+      bool isInsideNoiseBar = false; float posInBar = 0.0;
+      if (uNoiseBarWidth > 0.0) {
+            float barHeightUv = uNoiseBarWidth / 100.0; float effectY = finalUv.y + time * uNoiseBarSpeed * 0.5; float cyclePos = fract(effectY); float edgeNoise = (random(vec2(finalUv.x * 40.0, floor(time*3.0))) - 0.5) * 0.3; float effectiveBarHeight = max(barHeightUv + edgeNoise * barHeightUv, 0.0);
+            if (cyclePos < effectiveBarHeight) {
+                isInsideNoiseBar = true; posInBar = cyclePos / max(effectiveBarHeight, 0.01);
+                float skewFactor = pow(1.0 - posInBar, 2.0); float randomShift = (random(vec2(finalUv.y * 5.0, floor(time*8.0))) - 0.5) * 2.0; float horizontalOffset = skewFactor * -0.3 * randomShift; finalUv.x += horizontalOffset;
+            }
+      }
+      // Calculate final UVs for sampling
+      vec2 sampleUv = fract(finalUv); vec2 ghostOffset = vec2(uGhostDistance / resolution.x, 0.0); vec2 ghostSampleUv = fract(finalUv + ghostOffset);
 
-     // Apply Barrel Distortion (CRT Warp)
-     finalUv = barrelDistortion(finalUv, uCrtWarp);
+      // --- 2. Sample Textures & EARLY GHOST BLEND ---
+      vec2 centerOffs = vUv - 0.5; float aberrDist = length(centerOffs); vec2 aberrDir = (aberrDist > 0.0001) ? normalize(centerOffs) : vec2(0.0); vec2 aberrOffs = aberrDir * uChromaticAberration * aberrDist;
+      float r_main = texture2D(mapTexture, fract(sampleUv + aberrOffs)).r; float g_main = texture2D(mapTexture, fract(sampleUv)).g; float b_main = texture2D(mapTexture, fract(sampleUv - aberrOffs)).b; vec3 mainAberrColor = vec3(r_main, g_main, b_main); float mainAlpha = texture2D(mapTexture, sampleUv).a;
+      vec3 ghostAberrColor = vec3(0.0); if (uGhostIntensity > 0.0) { float r_ghost = texture2D(mapTexture, fract(ghostSampleUv + aberrOffs)).r; float g_ghost = texture2D(mapTexture, fract(ghostSampleUv)).g; float b_ghost = texture2D(mapTexture, fract(ghostSampleUv - aberrOffs)).b; ghostAberrColor = vec3(r_ghost, g_ghost, b_ghost); }
+      if (mainAlpha < 0.01 && uGhostIntensity <= 0.0) discard;
+      vec3 blendedAberrColor = mix(mainAberrColor, ghostAberrColor, uGhostIntensity);
 
-     // Discard early if warped UVs are way out of bounds
-     if (finalUv.x < -0.2 || finalUv.x > 1.2 || finalUv.y < -0.2 || finalUv.y > 1.2) {
-         discard;
-     }
+      // --- 3. Process the SINGLE Blended Color ---
+      // Includes clamping before final tint application
+      vec3 workingColor = processColor(blendedAberrColor, gl_FragCoord.xy, vUv, isInsideNoiseBar, posInBar);
 
-     // Apply Picture Roll
-     finalUv.y = fract(finalUv.y + time * uPictureRoll);
-
-     // Apply Skew
-     finalUv.x += (finalUv.y - 0.5) * uSkew;
-
-     // Apply Distortion Noise
-     float distortionOffset = (random(vec2(finalUv.y * 15.0, time * 0.4)) - 0.5) * uDistortion;
-     finalUv.x += distortionOffset;
-
-     // Apply Wobble
-     float wobbleOffset = sin(finalUv.y * uWobbleFrequency + time * uWobbleSpeed) * uWobbleAmplitude;
-     finalUv.x += wobbleOffset;
-
-     // Use fract() to wrap coordinates before sampling
-     vec2 sampleUv = fract(finalUv);
-
-     // --- 2. Sample Texture (with Chromatic Aberration) ---
-     vec2 centerOffs = vUv - 0.5;
-     float aberrDist = length(centerOffs);
-     vec2 aberrDir = (aberrDist > 0.0001) ? normalize(centerOffs) : vec2(0.0);
-     vec2 aberrOffs = aberrDir * uChromaticAberration * aberrDist;
-
-     float r = texture2D(mapTexture, fract(sampleUv + aberrOffs)).r;
-     float g = texture2D(mapTexture, fract(sampleUv)).g;
-     float b = texture2D(mapTexture, fract(sampleUv - aberrOffs)).b;
-
-     vec4 baseColor = texture2D(mapTexture, sampleUv);
-     vec3 aberrColor = vec3(r, g, b);
-
-     if (baseColor.a < 0.01) discard;
-
-     // --- 3. Apply Color Effects ---
-     float luminance = dot(aberrColor.rgb, vec3(0.299, 0.587, 0.114));
-     if (uInvertColors > 0.5) {
-         luminance = 1.0 - luminance;
-     }
-
-     // Apply Green Tint (Specific to this filter version)
-     vec3 tintedColor = vec3(luminance * (1.0 - uGreenTint), luminance, luminance * (1.0 - uGreenTint * 0.8));
-
-     // Brightness & Contrast
-     tintedColor = (tintedColor - 0.5) * uContrast + 0.5;
-     tintedColor = tintedColor * uBrightness;
-
-     // Scanlines
-     float scan = scanline(gl_FragCoord.xy, uScanlineIntensity);
-     tintedColor *= scan;
-
-     // Static Noise
-     float staticNoise = (random(sampleUv * 2.5 + vec2(time * 0.2, -time * 0.1)) - 0.5);
-     tintedColor += staticNoise * uStaticAmount * 1.5;
-
-     // Interference
-     float interferenceNoise = random(sampleUv * 0.6 + time * 0.05);
-     float interferenceFactor = smoothstep(0.75 - uInterference * 0.2, 0.75 + uInterference * 0.2, interferenceNoise);
-     tintedColor += interferenceFactor * uInterference * vec3(0.5, 1.0, 0.5); // Add green blotches
-
-     // Flicker
-     float flickerAmount = (random(vec2(time * 8.0)) - 0.5) * uFlicker;
-     tintedColor += flickerAmount;
-
-     // Hum Bar
-     float hum = sin(vUv.y * 20.0 + time * 3.0) * 0.5 + 0.5;
-     tintedColor += hum * uHumBarIntensity * 0.05;
-
-     // Vignette
-     tintedColor *= vignette(vUv, uVignetteAmount);
-
-     // --- 4. Final Masking & Output ---
-     float cornerMask = roundedCornerSDFMask(vUv, uRoundedCorners);
-     tintedColor *= cornerMask;
-     float finalAlpha = baseColor.a * cornerMask;
-
-     if (finalAlpha < 0.01) discard;
-
-     tintedColor = clamp(tintedColor, 0.0, 1.0);
-
-     gl_FragColor = vec4(tintedColor, finalAlpha);
+      // --- 4. Final Masking & Output ---
+      workingColor *= vignette(vUv, uVignetteAmount);
+      float cornerMask = roundedCornerSDFMask(vUv, uRoundedCorners); workingColor *= cornerMask; float finalAlpha = mainAlpha * cornerMask;
+      if (finalAlpha < 0.01) discard;
+      workingColor = clamp(workingColor, 0.0, 1.0); // Final safety clamp
+      gl_FragColor = vec4(workingColor, finalAlpha);
 }

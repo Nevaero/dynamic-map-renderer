@@ -6,52 +6,179 @@
       "invertDisplay": 0
     },
     "retro_sci_fi_amber": {
-      "amberTint": 0.8,
-      "brightness": 1,
+      "amberTint": 1,
+      "brightness": 1.2,
       "chromaticAberration": 0,
       "contrast": 1.2,
       "crtWarp": 0.03,
       "distortion": 0,
-      "flicker": 0,
+      "flicker": 0.08,
+      "ghostDistance": -28,
+      "ghostIntensity": 0.18,
       "humBarIntensity": 0,
       "interference": 0,
       "invertColors": 0,
+      "noiseBarSpeed": 0,
+      "noiseBarWidth": 0,
       "pictureRoll": 0,
-      "roundedCorners": 0.05,
-      "scanlineIntensity": 0.1,
+      "roundedCorners": 0.15,
+      "scanlineIntensity": 0.86,
+      "scanlineThickness": 4,
       "skew": 0,
       "staticAmount": 0.05,
-      "vignetteAmount": 0.5,
+      "tearFrequency": 8.7,
+      "vignetteAmount": 0.65,
       "wobbleAmplitude": 0,
       "wobbleFrequency": 5,
       "wobbleSpeed": 1
     },
     "retro_sci_fi_green": {
-      "brightness": 0.9,
-      "chromaticAberration": 0.0055,
-      "contrast": 1.15,
-      "crtWarp": 0.105,
-      "distortion": 0.001,
-      "flicker": 0.07,
-      "greenTint": 0.5,
-      "humBarIntensity": 0,
-      "interference": 0.06,
+      "brightness": 2,
+      "chromaticAberration": 0,
+      "contrast": 1.05,
+      "crtWarp": 0.09,
+      "distortion": 0.003,
+      "flicker": 0.21,
+      "ghostDistance": -8,
+      "ghostIntensity": 0.41,
+      "ghosting": 0,
+      "greenTint": 1,
+      "humBarIntensity": 0.1,
+      "interference": 0,
       "invertColors": 1,
+      "noiseBarSkewAmount": 0.3,
+      "noiseBarSpeed": 0,
+      "noiseBarWidth": 16,
       "pictureRoll": 0,
-      "roundedCorners": 0.05,
-      "scanlineIntensity": 0.15,
-      "skew": 0,
-      "staticAmount": 0.32,
-      "vignetteAmount": 0.35,
-      "wobbleAmplitude": 0.001,
-      "wobbleFrequency": 5.5,
-      "wobbleSpeed": 3.6
+      "rollLineSpeed": -0.25,
+      "rollLineWidth": 3,
+      "rotation": -0.5,
+      "roundedCorners": 0.15,
+      "scanlineIntensity": 0.56,
+      "scanlineThickness": 3,
+      "skew": -0.03,
+      "staticAmount": 0,
+      "tearFrequency": 1,
+      "vignetteAmount": 0.75,
+      "wobbleAmplitude": 0,
+      "wobbleFrequency": 150,
+      "wobbleSpeed": 9.7
     }
+  },
+  "fog_of_war": {
+    "hidden_polygons": [
+      {
+        "color": "#ffffFF",
+        "id": "poly_1744185015947_fk81d",
+        "vertices": [
+          {
+            "x": 0.04075372480280456,
+            "y": 0.8717366628830874
+          },
+          {
+            "x": 0.5964066608238388,
+            "y": 0.8774120317820658
+          },
+          {
+            "x": 0.6025416301489921,
+            "y": 0.9443813847900113
+          },
+          {
+            "x": 0.036371603856266435,
+            "y": 0.945516458569807
+          }
+        ]
+      },
+      {
+        "color": "#ffffFF",
+        "id": "poly_1744290621238_6cxw1",
+        "vertices": [
+          {
+            "x": 0.3334930981595092,
+            "y": 0.6174801362088536
+          },
+          {
+            "x": 0.32122315950920244,
+            "y": 0.6186152099886493
+          },
+          {
+            "x": 0.3220995836985101,
+            "y": 0.46311010215664017
+          },
+          {
+            "x": 0.9364729404031551,
+            "y": 0.4585698070374574
+          },
+          {
+            "x": 0.9312143952673094,
+            "y": 0.2724177071509648
+          },
+          {
+            "x": 0.8996631244522348,
+            "y": 0.2724177071509648
+          },
+          {
+            "x": 0.8987867002629273,
+            "y": 0.25312145289443816
+          },
+          {
+            "x": 0.9522485758106923,
+            "y": 0.25539160045402953
+          },
+          {
+            "x": 0.9592599693251533,
+            "y": 0.48354143019296253
+          },
+          {
+            "x": 0.33174024978089395,
+            "y": 0.47219069239500566
+          }
+        ]
+      },
+      {
+        "color": "#ffffFF",
+        "id": "poly_1744555486732_335k1",
+        "vertices": [
+          {
+            "x": 0.19149868536371603,
+            "y": 0.33938706015891035
+          },
+          {
+            "x": 0.20639789658194566,
+            "y": 0.33938706015891035
+          },
+          {
+            "x": 0.2046450482033304,
+            "y": 0.07491486946651532
+          },
+          {
+            "x": 0.6481156879929886,
+            "y": 0.07264472190692395
+          },
+          {
+            "x": 0.6507449605609115,
+            "y": 0.15664018161180476
+          },
+          {
+            "x": 0.6603856266432954,
+            "y": 0.15550510783200908
+          },
+          {
+            "x": 0.6656441717791411,
+            "y": 0.05788876276958002
+          },
+          {
+            "x": 0.18886941279579317,
+            "y": 0.05448354143019296
+          }
+        ]
+      }
+    ]
   },
   "map_content_path": "maps/TheAlexis.jpg",
   "view_state": {
     "center_x": 0.5,
     "center_y": 0.5,
-    "scale": 1.15
+    "scale": 1.1
   }
 }

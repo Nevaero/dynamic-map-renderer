@@ -1,64 +1,57 @@
 # app.py
-# Version: 2.5.3 (Fix IndentationError & Remove Duplication)
+# Version: 2.7.15 (Fog of War - Stage C: Default Help Map State)
 # Main Flask application file for the Dynamic Map Renderer
 
 import os
 import json
-# import uuid # No longer needed for session IDs
-from flask import Flask, request, jsonify, render_template # Removed session as flask_session
-# Import send_from_directory explicitly
-from flask import send_from_directory
-from flask_socketio import SocketIO, emit as socketio_emit, join_room, leave_room
-from werkzeug.utils import secure_filename
 import copy
 import traceback
-import re # For basic session ID validation
+import re
+import time
+import logging
+from uuid import uuid4
+from PIL import Image, ImageDraw, UnidentifiedImageError
 
-# Configuration
+from flask import Flask, request, jsonify, render_template, send_from_directory, send_file, make_response
+from flask_socketio import SocketIO, emit as socketio_emit, join_room, leave_room
+from werkzeug.utils import secure_filename
+
+# --- Configuration ---
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 MAPS_FOLDER = os.path.join(APP_ROOT, 'maps')
 CONFIGS_FOLDER = os.path.join(APP_ROOT, 'configs')
 FILTERS_FOLDER = os.path.join(APP_ROOT, 'filters')
+GENERATED_MAPS_FOLDER = os.path.join(APP_ROOT, 'generated_maps')
 ALLOWED_MAP_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
-# Basic validation for session IDs (alphanumeric, hyphen, underscore, 1-50 chars)
 SESSION_ID_REGEX = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
+DEFAULT_HELP_MAP_FILENAME = "Help.png" # Define default map filename
+
+# Ensure directories exist
+os.makedirs(MAPS_FOLDER, exist_ok=True)
+os.makedirs(CONFIGS_FOLDER, exist_ok=True)
+os.makedirs(FILTERS_FOLDER, exist_ok=True)
+os.makedirs(GENERATED_MAPS_FOLDER, exist_ok=True)
+
+# Setup logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Cleanup old generated maps on startup ---
+def cleanup_generated_maps():
+    """Removes old PNG files from the generated maps folder."""
+    logging.info(f"Cleaning up generated maps in: {GENERATED_MAPS_FOLDER}")
+    count = 0
+    try:
+        for filename in os.listdir(GENERATED_MAPS_FOLDER):
+            if filename.lower().endswith('.png'):
+                filepath = os.path.join(GENERATED_MAPS_FOLDER, filename)
+                try:
+                    if os.path.isfile(filepath): os.remove(filepath); count += 1
+                except OSError as e: logging.warning(f"Could not remove file {filepath}: {e}")
+        logging.info(f"Cleanup complete. Removed {count} file(s).")
+    except Exception as e: logging.error(f"Error during generated map cleanup: {e}", exc_info=True)
 
 # --- Filter Loading ---
 available_filters = {}
-# ** Full Implementation **
-def load_single_filter(filter_id):
-    filter_dir = os.path.join(FILTERS_FOLDER, filter_id)
-    config_path = os.path.join(filter_dir, 'config.json')
-    vertex_path = os.path.join(filter_dir, 'vertex.glsl')
-    fragment_path = os.path.join(filter_dir, 'fragment.glsl')
-    if not os.path.exists(config_path): return None
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f: config_data = json.load(f)
-        if not all(k in config_data for k in ['id', 'name', 'params']): raise ValueError("Invalid filter config structure")
-        if config_data['id'] != filter_id: raise ValueError(f"Filter ID mismatch for '{filter_id}'")
-        params = config_data.get('params', {})
-        keys_to_remove = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize']
-        for key in keys_to_remove:
-            if key in params: del params[key]
-        config_data['params'] = params
-        if os.path.exists(vertex_path): config_data['vertex_shader_path'] = os.path.join('filters', filter_id, 'vertex.glsl').replace('\\','/')
-        if os.path.exists(fragment_path): config_data['fragment_shader_path'] = os.path.join('filters', filter_id, 'fragment.glsl').replace('\\','/')
-        return config_data
-    except Exception as e: print(f"Error loading filter '{filter_id}': {e}"); traceback.print_exc(); return None
-
-def load_available_filters():
-    global available_filters; print(f"Scanning for filters in: {FILTERS_FOLDER}"); loaded_filters = {}
-    if not os.path.isdir(FILTERS_FOLDER): print(f"Warning: Filters directory not found: {FILTERS_FOLDER}"); return
-    for item in os.listdir(FILTERS_FOLDER):
-        item_path = os.path.join(FILTERS_FOLDER, item)
-        if os.path.isdir(item_path):
-            filter_id = item; filter_data = load_single_filter(filter_id)
-            if filter_data: loaded_filters[filter_id] = filter_data; print(f"  - Loaded filter: {filter_data['name']} (ID: {filter_id})")
-    available_filters = loaded_filters; print(f"Total filters loaded: {len(available_filters)}")
-
-# --- File Extension Checker ---
-def allowed_map_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_MAP_EXTENSIONS
 
 # Initialize Flask App & Config
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -66,311 +59,440 @@ app.config['SECRET_KEY'] = os.urandom(24)
 app.config['MAPS_FOLDER'] = MAPS_FOLDER
 app.config['CONFIGS_FOLDER'] = CONFIGS_FOLDER
 app.config['FILTERS_FOLDER'] = FILTERS_FOLDER
-os.makedirs(MAPS_FOLDER, exist_ok=True); os.makedirs(CONFIGS_FOLDER, exist_ok=True); os.makedirs(FILTERS_FOLDER, exist_ok=True)
+app.config['GENERATED_MAPS_FOLDER'] = GENERATED_MAPS_FOLDER
 
+# --- Filter Loading Function Definitions ---
+# ... (load_single_filter, load_available_filters - unchanged, condensed) ...
+def load_single_filter(filter_id):
+    filter_dir = os.path.join(FILTERS_FOLDER, filter_id); config_path = os.path.join(filter_dir, 'config.json'); vertex_path = os.path.join(filter_dir, 'vertex.glsl'); fragment_path = os.path.join(filter_dir, 'fragment.glsl')
+    if not os.path.exists(config_path): return None
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f: config_data = json.load(f)
+        if not all(k in config_data for k in ['id', 'name', 'params']): raise ValueError("Invalid structure")
+        if config_data['id'] != filter_id: raise ValueError(f"ID mismatch: {filter_id}")
+        params = config_data.get('params', {}); keys_to_remove = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize'];
+        for key in keys_to_remove: params.pop(key, None)
+        config_data['params'] = params
+        if os.path.exists(vertex_path): config_data['vertex_shader_path'] = os.path.join('filters', filter_id, 'vertex.glsl').replace('\\', '/')
+        if os.path.exists(fragment_path): config_data['fragment_shader_path'] = os.path.join('filters', filter_id, 'fragment.glsl').replace('\\', '/')
+        return config_data
+    except Exception as e: logging.error(f"Error loading filter '{filter_id}': {e}", exc_info=True); return None
+def load_available_filters():
+    global available_filters; logging.info(f"Scanning for filters in: {FILTERS_FOLDER}"); loaded_filters = {}
+    if not os.path.isdir(FILTERS_FOLDER): logging.warning(f"Filters dir not found: {FILTERS_FOLDER}"); return
+    for item in os.listdir(FILTERS_FOLDER):
+        item_path = os.path.join(FILTERS_FOLDER, item)
+        if os.path.isdir(item_path):
+            filter_id = item; filter_data = load_single_filter(filter_id)
+            if filter_data: loaded_filters[filter_id] = filter_data; logging.info(f"  - Loaded: {filter_data['name']} ({filter_id})")
+    available_filters = loaded_filters; logging.info(f"Total filters loaded: {len(available_filters)}")
+
+# Load filters on startup
 load_available_filters()
+
+# Initialize SocketIO AFTER app instance is created
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # --- In-Memory State Storage ---
 session_states = {}
 
-# --- Helper Functions ---
-# ** Corrected Indentation and Removed Semicolons **
+# --- Helper Function Definitions ---
+# ... (allowed_map_file, get_map_config_path, load_map_config, save_map_config - unchanged, condensed) ...
+def allowed_map_file(filename):
+    if not filename: return False
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_MAP_EXTENSIONS
 def get_map_config_path(map_filename):
-    secured_base = secure_filename(map_filename)
-    config_filename = f"{secured_base}_config.json"
-    return os.path.join(app.config['CONFIGS_FOLDER'], config_filename)
-
+    secured_base = secure_filename(map_filename); config_filename = f"{secured_base}_config.json"; return os.path.join(app.config['CONFIGS_FOLDER'], config_filename)
 def load_map_config(map_filename):
-    config_path = get_map_config_path(map_filename) # Removed semicolon
-    if not os.path.exists(config_path):
-        return None
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config_data = json.load(f)
-        # Check and migrate old path key
-        if 'map_content_path' not in config_data and 'map_image_path' in config_data:
-            config_data['map_content_path'] = config_data['map_image_path']
-        if 'map_image_path' in config_data:
-            del config_data['map_image_path']
-        # Force display type
-        config_data['display_type'] = "image"
-        # Remove text/legacy filter params if they exist
+    config_path = get_map_config_path(map_filename); backup_path = config_path + ".bak"; config_data = None; source_loaded = None
+    if os.path.exists(config_path):
+        logging.debug(f"Loading main config: {config_path}")
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f: config_data = json.load(f)
+            logging.info(f"Loaded config: {config_path}"); source_loaded = "main"
+        except Exception as e: logging.error(f"Error reading/decoding main config {config_path}: {e}"); config_data = None
+    if config_data is None and os.path.exists(backup_path):
+        logging.warning(f"Main config failed/missing for '{map_filename}', trying backup: {backup_path}")
+        try:
+            with open(backup_path, 'r', encoding='utf-8') as f: config_data = json.load(f)
+            logging.info(f"Loaded config from backup: {backup_path}"); source_loaded = "backup"
+            if save_map_config(map_filename, config_data, create_backup=False): logging.info(f"Restored main config from backup for {map_filename}")
+            else: logging.error(f"Failed to restore main config from backup for {map_filename}")
+        except Exception as e: logging.error(f"Error reading/decoding backup config {backup_path}: {e}"); config_data = None
+    if config_data is not None:
+        try: # Cleanup/Migration/Defaulting logic...
+            if 'map_content_path' not in config_data and 'map_image_path' in config_data: config_data['map_content_path'] = config_data.pop('map_image_path')
+            config_data['display_type'] = "image"
+            if 'map_content_path' not in config_data:
+                expected_path = os.path.join('maps', secure_filename(map_filename)).replace('\\', '/')
+                if os.path.exists(os.path.join(app.config['MAPS_FOLDER'], secure_filename(map_filename))): config_data['map_content_path'] = expected_path
+                else: logging.error(f"Cannot find map file {map_filename}."); return None
+            if 'filter_params' in config_data:
+                params = config_data['filter_params']; keys_to_remove = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize']
+                for filter_id in list(params.keys()):
+                    if isinstance(params.get(filter_id), dict):
+                        for key in keys_to_remove: params[filter_id].pop(key, None)
+                config_data['filter_params'] = params
+            if "view_state" not in config_data: config_data["view_state"] = {"center_x": 0.5, "center_y": 0.5, "scale": 1.0}
+            if "fog_of_war" not in config_data: config_data["fog_of_war"] = {"hidden_polygons": []}
+            elif not isinstance(config_data.get("fog_of_war"), dict): config_data["fog_of_war"] = {"hidden_polygons": []}
+            elif "hidden_polygons" not in config_data["fog_of_war"] or not isinstance(config_data["fog_of_war"].get("hidden_polygons"), list): config_data["fog_of_war"]["hidden_polygons"] = []
+            return config_data
+        except Exception as e: logging.error(f"Error processing config {map_filename}: {e}", exc_info=True); return None
+    logging.warning(f"Config/backup not found/failed for {map_filename}.")
+    return None
+def save_map_config(map_filename, config_data, create_backup=True):
+    config_path = get_map_config_path(map_filename); backup_path = config_path + ".bak"; temp_path = config_path + ".tmp"
+    try: # Cleanup/Validation logic...
+        expected_path = os.path.join('maps', secure_filename(map_filename)).replace('\\', '/'); config_data['map_content_path'] = expected_path
+        config_data['display_type'] = 'image'; config_data.pop('map_image_path', None)
         if 'filter_params' in config_data:
-            params = config_data['filter_params']
-            keys_to_remove = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize']
-            # Iterate safely
+            params = config_data['filter_params']; keys_to_remove = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize']
             for filter_id in list(params.keys()):
-                if isinstance(params.get(filter_id), dict): # Use .get for safety
-                    for key in keys_to_remove:
-                        if key in params[filter_id]:
-                            del params[filter_id][key]
-            config_data['filter_params'] = params # Assign cleaned params back
-        # Final check for essential key
-        if 'map_content_path' not in config_data:
-            return None
-        return config_data
-    except Exception as e:
-        print(f"Error loading/parsing config for {map_filename}: {e}")
-        traceback.print_exc()
-        return None
-
-def save_map_config(map_filename, config_data):
-    config_path = get_map_config_path(map_filename) # Removed semicolon
-    try:
-        # Clean up before saving
-        if 'map_image_path' in config_data:
-            if 'map_content_path' not in config_data: config_data['map_content_path'] = config_data['map_image_path']
-            del config_data['map_image_path']
-        config_data['display_type'] = "image"
-        if 'filter_params' in config_data:
-            params = config_data['filter_params']
-            keys_to_remove = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize']
-            for filter_id in list(params.keys()):
-                 if isinstance(params.get(filter_id), dict): # Use .get for safety
-                      for key in keys_to_remove:
-                           if key in params[filter_id]: del params[filter_id][key]
+                if isinstance(params.get(filter_id), dict):
+                    for key in keys_to_remove: params[filter_id].pop(key, None)
             config_data['filter_params'] = params
-        expected_path = os.path.join('maps', secure_filename(map_filename)).replace('\\', '/')
-        config_data['map_content_path'] = expected_path # Ensure path matches filename
-        # Write the file
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config_data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"Error saving config for {map_filename}: {e}")
-        traceback.print_exc()
-        return False
+        if "view_state" not in config_data: config_data["view_state"] = {"center_x": 0.5, "center_y": 0.5, "scale": 1.0}
+        if "fog_of_war" not in config_data or not isinstance(config_data.get("fog_of_war"), dict): config_data["fog_of_war"] = {"hidden_polygons": []}
+        if "hidden_polygons" not in config_data["fog_of_war"] or not isinstance(config_data["fog_of_war"].get("hidden_polygons"), list): config_data["fog_of_war"]["hidden_polygons"] = []
+        with open(temp_path, 'w', encoding='utf-8') as f: json.dump(config_data, f, indent=2, ensure_ascii=False)
+        if create_backup:
+            try:
+                if os.path.exists(config_path): os.replace(config_path, backup_path)
+                logging.debug(f"Created backup: {backup_path}")
+            except OSError as e: logging.error(f"Could not create backup {backup_path}: {e}", exc_info=True)
+        os.replace(temp_path, config_path); logging.info(f"Map config saved: {config_path}"); return True
+    except Exception as e: logging.error(f"Error saving config {map_filename}: {e}", exc_info=True)
+    finally:
+         if os.path.exists(temp_path):
+             try: os.remove(temp_path)
+             except OSError: pass
+    return False
 
+# ... (get_default_filter_params - unchanged, condensed) ...
 def get_default_filter_params():
-    filter_params = {}
-    text_params = ['defaultFontFamily', 'defaultTextSpeed', 'fontSize']
+    filter_params = {}; text_params = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize']
     for f_id, f_config in available_filters.items():
-        filter_params[f_id] = {
-            key: param_data.get('value')
-            for key, param_data in f_config.get('params', {}).items()
-            if 'value' in param_data and key != 'backgroundImageFilename' and key not in text_params
-        }
+        defaults = {};
+        for key, param_data in f_config.get('params', {}).items():
+            if 'value' in param_data and key not in text_params: defaults[key] = param_data['value']
+        filter_params[f_id] = defaults
     return filter_params
 
+# *** MODIFIED Function: get_default_session_state ***
 def get_default_session_state():
+    """
+    Returns the default structure for a new session state.
+    Attempts to load Help.png state if it exists.
+    """
+    logging.debug(f"Attempting to load default state, checking for {DEFAULT_HELP_MAP_FILENAME}")
+    help_map_path = os.path.join(app.config['MAPS_FOLDER'], DEFAULT_HELP_MAP_FILENAME)
+    if os.path.exists(help_map_path):
+        logging.info(f"Found {DEFAULT_HELP_MAP_FILENAME}, attempting to load its state as default.")
+        # Use get_state_for_map which handles loading config or generating defaults for Help.png
+        default_state = get_state_for_map(DEFAULT_HELP_MAP_FILENAME)
+        if default_state:
+            # Ensure map_content_path is None initially for the session state
+            # The player URL will be generated when the player joins
+            default_state['map_content_path'] = None
+            logging.info(f"Using state from {DEFAULT_HELP_MAP_FILENAME} as default session state.")
+            return default_state
+        else:
+            logging.warning(f"Found {DEFAULT_HELP_MAP_FILENAME} but failed to load/generate its state.")
+            # Fall through to generic default if Help.png state fails
+
+    # Fallback to generic default if Help.png doesn't exist or its state fails to load
+    logging.info("Using generic default session state (no map loaded).")
     default_filter_id = "none" if "none" in available_filters else list(available_filters.keys())[0] if available_filters else ""
     return {
+        "original_map_path": None,
         "map_content_path": None,
         "display_type": "image",
         "current_filter": default_filter_id,
-        "view_state": { "center_x": 0.5, "center_y": 0.5, "scale": 1.0 },
-        "filter_params": get_default_filter_params()
+        "view_state": {"center_x": 0.5, "center_y": 0.5, "scale": 1.0},
+        "filter_params": get_default_filter_params(),
+        "fog_of_war": {"hidden_polygons": []}
     }
 
+# ... (get_state_for_map, merge_dicts - unchanged, condensed) ...
 def get_state_for_map(map_filename):
     config = load_map_config(map_filename)
-    if config:
-        loaded_filter_params = config.get("filter_params", {})
-        default_filter_params = get_default_filter_params()
+    if config: # Defaulting logic...
+        loaded_filter_params = config.get("filter_params", {}); default_filter_params = get_default_filter_params()
         for f_id, params in default_filter_params.items():
-            if f_id not in loaded_filter_params:
-                loaded_filter_params[f_id] = params
+            if f_id not in loaded_filter_params: loaded_filter_params[f_id] = params
             else:
-                # Ensure all default keys exist for this filter
                 for key, default_value in params.items():
-                    if key not in loaded_filter_params[f_id]:
-                        loaded_filter_params[f_id][key] = default_value
+                    if key not in loaded_filter_params[f_id]: loaded_filter_params[f_id][key] = default_value
         config["filter_params"] = loaded_filter_params
-        config["display_type"] = "image" # Ensure type
-        # Ensure view_state exists
-        if "view_state" not in config:
-             config["view_state"] = { "center_x": 0.5, "center_y": 0.5, "scale": 1.0 }
-        return config
-    else:
-        # Generate default if config file missing but map exists
+        if "view_state" not in config: config["view_state"] = {"center_x": 0.5, "center_y": 0.5, "scale": 1.0}
+        if "fog_of_war" not in config: config["fog_of_war"] = {"hidden_polygons": []}
+        config["display_type"] = "image"; config["original_map_path"] = config.get("map_content_path")
+        logging.info(f"Loaded state for map: {map_filename}"); return config
+    else: # Generate default if map exists
         map_path_on_disk = os.path.join(app.config['MAPS_FOLDER'], secure_filename(map_filename))
         if os.path.exists(map_path_on_disk) and allowed_map_file(map_filename):
             relative_path = os.path.join('maps', secure_filename(map_filename)).replace('\\', '/')
-            display_type = "image"
-            default_filter_id = "none" if "none" in available_filters else list(available_filters.keys())[0] if available_filters else ""
-            print(f"Generating default image state for map: {relative_path}")
-            return {
-                "map_content_path": relative_path,
-                "display_type": display_type,
-                "current_filter": default_filter_id,
-                "view_state": { "center_x": 0.5, "center_y": 0.5, "scale": 1.0 },
-                "filter_params": get_default_filter_params()
-            }
-        else:
-            print(f"Warning: Map file not found or not allowed: {map_filename}")
-            return None
-
+            logging.info(f"Generating default state for: {map_filename}.")
+            # Use the generic default generator here, NOT the modified one to avoid recursion
+            generic_default_state = { "original_map_path": relative_path, "map_content_path": None, "display_type": "image",
+                                      "current_filter": "none" if "none" in available_filters else list(available_filters.keys())[0] if available_filters else "",
+                                      "view_state": {"center_x": 0.5, "center_y": 0.5, "scale": 1.0}, "filter_params": get_default_filter_params(),
+                                      "fog_of_war": {"hidden_polygons": []} }
+            return generic_default_state
+        else: logging.warning(f"Map file not found/invalid: {map_filename}"); return None
 def merge_dicts(dict1, dict2):
     result = copy.deepcopy(dict1)
     for key, value in dict2.items():
+        if key == 'original_map_path': continue
         if isinstance(value, dict) and key in result and isinstance(result[key], dict):
-            result[key] = merge_dicts(result[key], value)
-        else:
-            result[key] = value
+            if key == 'fog_of_war':
+                if 'hidden_polygons' in value: result['fog_of_war']['hidden_polygons'] = copy.deepcopy(value['hidden_polygons'])
+                for fog_key, fog_value in value.items():
+                    if fog_key != 'hidden_polygons':
+                        if isinstance(fog_value, dict) and fog_key in result['fog_of_war'] and isinstance(result['fog_of_war'][fog_key], dict):
+                            result['fog_of_war'][fog_key] = merge_dicts(result['fog_of_war'][fog_key], fog_value)
+                        else: result['fog_of_war'][fog_key] = fog_value
+            else: result[key] = merge_dicts(result[key], value)
+        else: result[key] = value
     return result
 
-# --- HTTP Routes ---
-@app.route('/')
-def index():
-    return render_template('index.html')
+# ... (generate_player_map - unchanged, condensed) ...
+def generate_player_map(session_id, state):
+    original_map_path = state.get('original_map_path'); fog_data = state.get('fog_of_war', {}).get('hidden_polygons', [])
+    if not original_map_path: logging.debug(f"generate_player_map: No original_map_path."); return None
+    full_map_path = os.path.join(APP_ROOT, original_map_path)
+    if not os.path.exists(full_map_path): logging.error(f"generate_player_map: Original map missing: {full_map_path}"); return None
+    output_path = None
+    try:
+        with Image.open(full_map_path).convert('RGBA') as base_image:
+            draw = ImageDraw.Draw(base_image)
+            for polygon in fog_data: # Draw polygons...
+                vertices = polygon.get('vertices'); 
+                if not vertices or not isinstance(vertices, list) or len(vertices) < 3: continue
+                size_x, size_y = base_image.size; absolute_vertices = []; valid_polygon = True
+                for vertex in vertices:
+                     if isinstance(vertex, dict) and 'x' in vertex and 'y' in vertex:
+                         try: x_coord = max(0, min(int(float(vertex['x']) * size_x), size_x - 1)); y_coord = max(0, min(int(float(vertex['y']) * size_y), size_y - 1)); absolute_vertices.append((x_coord, y_coord))
+                         except (ValueError, TypeError): valid_polygon = False; break
+                     else: valid_polygon = False; break
+                if not valid_polygon or len(absolute_vertices) < 3: continue
+                color = polygon.get('color', '#000000');
+                try:
+                    if not re.match(r'^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$', color): color = '#000000'
+                    draw.polygon(absolute_vertices, fill=color)
+                except Exception as e: logging.error(f"generate_player_map: Error drawing polygon: {e}")
+            timestamp = int(time.time()); output_filename = f"{session_id}_{timestamp}_{uuid4().hex[:8]}.png"
+            output_path = os.path.join(app.config['GENERATED_MAPS_FOLDER'], output_filename)
+            base_image.save(output_path, 'PNG')
+        image_url = f"/generated_maps/{output_filename}"; logging.info(f"Generated map image: {output_path} URL: {image_url}"); return image_url
+    except UnidentifiedImageError: logging.error(f"generate_player_map: Pillow could not identify: {full_map_path}")
+    except Exception as e: logging.error(f"Error generating player map: {e}", exc_info=True)
+    return None
 
+# --- HTTP Routes (Unchanged, condensed) ---
+@app.route('/')
+def index(): return render_template('index.html')
 @app.route('/player')
 def player():
     session_id = request.args.get('session')
-    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
-        return "Error: Session ID is missing, invalid, or too long.", 400
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id): return "Error: Session ID missing/invalid.", 400
     return render_template('player.html', session_id=session_id)
-
-# --- Static File Serving ---
 @app.route('/maps/<path:filename>')
 def serve_map_image(filename):
-    # ** Full Implementation Restored **
-    print(f"[serve_map_image] Request for: {filename}")
-    safe_base_filename = secure_filename(filename)
-    print(f"[serve_map_image] Secured filename: {safe_base_filename}")
-    if not allowed_map_file(safe_base_filename): print(f"[serve_map_image] ERROR: File type not allowed"); return jsonify({"error": "File type not allowed"}), 404
-    maps_dir = app.config['MAPS_FOLDER']; print(f"[serve_map_image] Serving from directory: {maps_dir}")
+    log_prefix = "[serve_map_image]"; logging.debug(f"{log_prefix} Request: {filename}"); safe_base_filename = secure_filename(filename)
+    if safe_base_filename.startswith("generated_"): logging.warning(f"{log_prefix} Denying generated: {filename}"); return jsonify({"error": "Access denied"}), 403
+    logging.debug(f"{log_prefix} Secured: {safe_base_filename}"); maps_dir = app.config['MAPS_FOLDER']; filepath = os.path.join(maps_dir, safe_base_filename)
+    logging.debug(f"{log_prefix} Path: '{filepath}'"); file_exists = os.path.exists(filepath); is_file = os.path.isfile(filepath)
+    logging.debug(f"{log_prefix} Exists: {file_exists}, Is file: {is_file}")
     try:
-        file_path = os.path.join(maps_dir, safe_base_filename); print(f"[serve_map_image] Attempting to serve file path: {file_path}")
-        abs_maps_dir = os.path.abspath(maps_dir); abs_file_path = os.path.abspath(file_path)
-        if not os.path.exists(file_path): print(f"[serve_map_image] ERROR: File does not exist"); raise FileNotFoundError
-        if not abs_file_path.startswith(abs_maps_dir): print(f"[serve_map_image] ERROR: Path traversal attempt?"); raise FileNotFoundError
-        print(f"[serve_map_image] Calling send_from_directory for dir='{maps_dir}', filename='{safe_base_filename}'")
-        response = send_from_directory(maps_dir, safe_base_filename, as_attachment=False)
-        print(f"[serve_map_image] send_from_directory successful for {safe_base_filename}")
-        return response
-    except FileNotFoundError: print(f"[serve_map_image] FileNotFoundError caught"); return jsonify({"error": "Map image file not found"}), 404
-    except Exception as e: print(f"[serve_map_image] !!! UNEXPECTED ERROR serving '{safe_base_filename}' !!!"); print(f"[serve_map_image] Exception type: {type(e).__name__}"); print(f"[serve_map_image] Exception args: {e.args}"); traceback.print_exc(); return jsonify({"error": "Internal server error"}), 500
-
+        if not file_exists or not is_file: raise FileNotFoundError()
+        if not os.path.abspath(filepath).startswith(os.path.abspath(maps_dir)): raise FileNotFoundError()
+        logging.debug(f"{log_prefix} Sending from dir='{maps_dir}', filename='{safe_base_filename}'"); response = send_from_directory(maps_dir, safe_base_filename, as_attachment=False)
+        logging.debug(f"{log_prefix} Success for {safe_base_filename}"); return response
+    except FileNotFoundError: logging.error(f"{log_prefix} FileNotFoundError: {filename}")
+    except Exception as e: logging.error(f"{log_prefix} Error serving '{safe_base_filename}': {e}", exc_info=True)
+    return jsonify({"error": "Map image not found or error"}), 404
+@app.route('/generated_maps/<filename>')
+def serve_generated_map(filename):
+    log_prefix = "[serve_generated_map]"; logging.debug(f"{log_prefix} Route hit. Raw: '{filename}'"); safe_filename = secure_filename(filename)
+    if safe_filename != filename: logging.warning(f"{log_prefix} Sanitized: '{safe_filename}'")
+    generated_maps_dir = app.config['GENERATED_MAPS_FOLDER']; filepath = os.path.join(generated_maps_dir, safe_filename)
+    logging.debug(f"{log_prefix} Path: '{filepath}'"); file_exists = os.path.exists(filepath); is_file = os.path.isfile(filepath)
+    logging.debug(f"{log_prefix} Exists: {file_exists}, Is file: {is_file}")
+    try:
+        if not file_exists or not is_file: logging.error(f"{log_prefix} Not found/file: {filepath}"); raise FileNotFoundError()
+        if not os.path.abspath(filepath).startswith(os.path.abspath(generated_maps_dir)): logging.error(f"{log_prefix} Traversal attempt: {filename}"); raise FileNotFoundError()
+        logging.debug(f"{log_prefix} Sending file: '{filepath}'"); response = make_response(send_file(filepath, mimetype='image/png', as_attachment=False))
+        response.headers['Access-Control-Allow-Origin'] = '*'; logging.debug(f"{log_prefix} Added CORS header."); return response
+    except FileNotFoundError: logging.error(f"{log_prefix} FileNotFoundError: {filename}")
+    except Exception as e: logging.error(f"{log_prefix} Error serving {filename}: {e}", exc_info=True)
+    status_code = 404 if isinstance(e, FileNotFoundError) else 500
+    return make_response(jsonify({"error": "Generated map image not found or error"}), status_code)
 @app.route('/filters/<path:filter_id>/<shader_type>')
 def serve_shader(filter_id, shader_type):
-    # ** Full Implementation Restored **
-    secured_filter_id = secure_filename(filter_id); secured_shader_type = secure_filename(shader_type)
+    logging.debug(f"Request shader: {filter_id}/{shader_type}"); secured_filter_id=secure_filename(filter_id); secured_shader_type=secure_filename(shader_type)
     if secured_shader_type not in ['vertex.glsl', 'fragment.glsl']: return jsonify({"error": "Invalid shader type"}), 400
-    filters_dir = app.config['FILTERS_FOLDER']; filter_subdir = os.path.join(filters_dir, secured_filter_id)
+    filters_dir=app.config['FILTERS_FOLDER']; filter_subdir=os.path.join(filters_dir, secured_filter_id); shader_path=os.path.join(filter_subdir, secured_shader_type)
+    logging.debug(f"Serving shader from: {shader_path}")
     try:
-        shader_path = os.path.join(filter_subdir, secured_shader_type)
-        if not os.path.exists(shader_path) or not os.path.abspath(shader_path).startswith(os.path.abspath(filters_dir)): raise FileNotFoundError
+        if not os.path.abspath(shader_path).startswith(os.path.abspath(filters_dir)): raise FileNotFoundError
+        if not os.path.exists(shader_path): raise FileNotFoundError
         return send_from_directory(filter_subdir, secured_shader_type, mimetype='text/plain')
-    except FileNotFoundError: return jsonify({"error": "Shader file not found"}), 404
-    except Exception as e: print(f"Err serve shader {filter_id}/{shader_type}: {e}"); return jsonify({"error": "Server error"}), 500
-
-# --- API Routes ---
-# ** Full Implementations Restored **
+    except FileNotFoundError: logging.error(f"Shader not found: {filter_id}/{shader_type}")
+    except Exception as e: logging.error(f"Error serving shader {filter_id}/{shader_type}: {e}", exc_info=True)
+    return jsonify({"error": "Shader not found or error"}), 404
 @app.route('/api/filters', methods=['GET'])
 def get_filters():
-    client_safe_filters = {}; text_params = ['defaultFontFamily', 'defaultTextSpeed', 'fontSize']
+    client_safe_filters = {}; text_params = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize']
     for f_id, f_config in available_filters.items():
-         safe_config = {k: v for k, v in f_config.items() if k not in ['vertex_shader_path', 'fragment_shader_path']}
-         if 'params' in safe_config:
-             params_copy = copy.deepcopy(safe_config['params']); keys_to_remove = ['backgroundImageFilename'] + text_params
-             for key in keys_to_remove:
-                 if key in params_copy: del params_copy[key]
-             safe_config['params'] = params_copy
-         client_safe_filters[f_id] = safe_config
+        safe_config = {k: v for k, v in f_config.items() if k not in ['vertex_shader_path', 'fragment_shader_path']}
+        if 'params' in safe_config: params_copy = copy.deepcopy(safe_config['params']); [params_copy.pop(key, None) for key in text_params]; safe_config['params'] = params_copy
+        client_safe_filters[f_id] = safe_config
     return jsonify(client_safe_filters)
-
 @app.route('/api/maps', methods=['GET'])
 def list_map_content():
     try:
-        maps_dir = app.config['MAPS_FOLDER'];
-        if not os.path.isdir(maps_dir): return jsonify([])
-        content_files = [f for f in os.listdir(maps_dir) if os.path.isfile(os.path.join(maps_dir, f)) and allowed_map_file(f)]
+        maps_dir = app.config['MAPS_FOLDER']
+        if not os.path.isdir(maps_dir): logging.error(f"Maps directory not found: {maps_dir}"); return jsonify([])
+        content_files = [f for f in os.listdir(maps_dir) if os.path.isfile(os.path.join(maps_dir, f)) and allowed_map_file(f) and not f.startswith('generated_')]
         return jsonify(sorted(content_files))
-    except Exception as e: print(f"Error listing map content: {e}"); return jsonify({"error": "Server error"}), 500
-
+    except Exception as e: logging.error(f"Error listing map content in {maps_dir}: {e}", exc_info=True); return jsonify({"error": "Server error listing maps"}), 500
 @app.route('/api/maps', methods=['POST'])
 def upload_map_content():
     if 'mapFile' not in request.files: return jsonify({"error": "No file part"}), 400
-    file = request.files['mapFile']
+    file = request.files['mapFile'];
     if file.filename == '': return jsonify({"error": "No selected file"}), 400
     if file and allowed_map_file(file.filename):
-        filename = secure_filename(file.filename); save_path = os.path.join(app.config['MAPS_FOLDER'], filename)
+        filename = secure_filename(file.filename); save_path = os.path.join(app.config['MAPS_FOLDER'], filename); config_path = get_map_config_path(filename)
         try:
-            file.save(save_path); config_path = get_map_config_path(filename)
-            if not os.path.exists(config_path):
-                 print(f"Creating default config for uploaded map '{filename}'.")
-                 default_state = get_state_for_map(filename)
+            file.save(save_path); logging.info(f"Map uploaded: {save_path}")
+            if not os.path.exists(config_path) and not os.path.exists(config_path + ".bak"):
+                 logging.info(f"Creating default config for {filename}."); default_state = get_state_for_map(filename)
                  if default_state:
-                     if not save_map_config(filename, default_state): print(f"Warning: Failed save default config.")
-                 else: print(f"Warning: Could not generate default state.")
+                     if not save_map_config(filename, default_state): logging.warning(f"Failed save default config {filename}.")
+                     else: logging.info(f"Default config saved {filename}")
+                 else: logging.warning(f"Could not generate default state {filename}.")
+            else: logging.info(f"Config exists {filename}.")
             return jsonify({"success": True, "filename": filename}), 201
-        except Exception as e: print(f"Err save map upload '{filename}': {e}"); return jsonify({"error": "Could not save"}), 500
-    else: return jsonify({"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_MAP_EXTENSIONS)}"}), 400
-
+        except Exception as e: logging.error(f"Error saving map '{filename}': {e}", exc_info=True); return jsonify({"error": "Could not save map"}), 500
+    else: logging.warning(f"Upload rejected type: '{file.filename}'"); allowed_str = ', '.join(ALLOWED_MAP_EXTENSIONS); return jsonify({"error": f"Type not allowed. Allowed: {allowed_str}"}), 400
 @app.route('/api/config/<path:map_filename>', methods=['GET'])
 def get_config(map_filename):
-    secured_filename = secure_filename(map_filename)
-    if not allowed_map_file(secured_filename): return jsonify({"error": "Invalid file type"}), 400
+    secured_filename = secure_filename(map_filename); map_file_path = os.path.join(app.config['MAPS_FOLDER'], secured_filename)
+    if not allowed_map_file(secured_filename) or not os.path.exists(map_file_path): return jsonify({"error": "Map not found/invalid"}), 404
     map_state = get_state_for_map(secured_filename)
-    if map_state: return jsonify(map_state)
-    else: return jsonify({"error": "Map file not found"}), 404
-
+    if map_state: state_to_send = copy.deepcopy(map_state); state_to_send.pop('original_map_path', None); return jsonify(state_to_send)
+    else: logging.error(f"Failed get/generate state {secured_filename}"); return jsonify({"error": "Could not get/generate config"}), 500
 @app.route('/api/config/<path:map_filename>', methods=['POST'])
 def save_config_api(map_filename):
-    secured_filename = secure_filename(map_filename)
-    if not allowed_map_file(secured_filename): return jsonify({"error": "Invalid file type"}), 400
+    secured_filename = secure_filename(map_filename); map_file_path = os.path.join(app.config['MAPS_FOLDER'], secured_filename)
+    if not allowed_map_file(secured_filename) or not os.path.exists(map_file_path): return jsonify({"error": "Map not found/invalid"}), 404
     if not request.is_json: return jsonify({"error": "Request must be JSON"}), 400
-    config_data = request.get_json()
-    if not isinstance(config_data, dict) or not all(k in config_data for k in ("map_content_path", "current_filter", "view_state", "filter_params")): return jsonify({"error": "Invalid config data structure"}), 400
-    if save_map_config(secured_filename, config_data): print(f"Map config saved: {secured_filename}"); return jsonify({"success": True}), 200
-    else: return jsonify({"error": "Could not save map configuration"}), 500
+    config_data = request.get_json(); required_keys = ["map_content_path", "current_filter", "view_state", "filter_params", "fog_of_war"]
+    if not isinstance(config_data, dict) or not all(k in config_data for k in required_keys): return jsonify({"error": "Invalid config structure"}), 400
+    fog_data = config_data.get("fog_of_war");
+    if not isinstance(fog_data, dict) or not isinstance(fog_data.get("hidden_polygons"), list): return jsonify({"error": "Invalid fog structure"}), 400
+    if save_map_config(secured_filename, config_data): logging.info(f"Config saved via API: {secured_filename}"); return jsonify({"success": True}), 200
+    else: logging.error(f"Failed save config via API: {map_filename}"); return jsonify({"error": "Could not save config"}), 500
 
 # --- WebSocket Event Handlers ---
-# ** Full Implementations with updated validation **
 @socketio.on('connect')
-def handle_connect(): print(f"Client connected: {request.sid}")
+def handle_connect(): logging.info(f"Client connected: {request.sid}")
 
 @socketio.on('disconnect')
-def handle_disconnect(): print(f"Client disconnected: {request.sid}")
+def handle_disconnect(): logging.info(f"Client disconnected: {request.sid}")
 
 @socketio.on('join_session')
 def handle_join_session(data):
-    if not isinstance(data, dict) or 'session_id' not in data: socketio_emit('error', {'message': 'Invalid join request.'}, to=request.sid); return
-    session_id = data['session_id']
-    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id): socketio_emit('error', {'message': f'Invalid session ID format or length.'}, to=request.sid); return
-    join_room(session_id); print(f"Client {request.sid} joined session room: {session_id}")
-    current_session_state = session_states.get(session_id)
-    if not current_session_state: current_session_state = get_default_session_state(); session_states[session_id] = current_session_state
-    print(f"Sending initial state for session {session_id} to client {request.sid}")
-    socketio_emit('state_update', current_session_state, to=request.sid)
+    """Handles player joining a session."""
+    if not isinstance(data, dict) or 'session_id' not in data: logging.warning(f"Invalid join: {request.sid}"); socketio_emit('error', {'message': 'Invalid join.'}, to=request.sid); return
+    session_id = data['session_id'];
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id): logging.warning(f"Invalid join ID: {session_id}"); socketio_emit('error', {'message': f'Invalid session ID.'}, to=request.sid); return
+    join_room(session_id); logging.info(f"Client {request.sid} joined: {session_id}")
+    # *** Use updated get_default_session_state when creating ***
+    if session_id not in session_states:
+        logging.info(f"Creating default state for session: {session_id}")
+        session_states[session_id] = get_default_session_state() # This might now load Help.png state
+    current_session_state = session_states.get(session_id); player_map_url = None
+    if current_session_state.get('original_map_path'):
+        player_map_url = generate_player_map(session_id, current_session_state)
+    state_to_send = copy.deepcopy(current_session_state); state_to_send['map_content_path'] = player_map_url
+    state_to_send.pop('original_map_path', None)
+    logging.info(f"Sending initial state to {request.sid}. Player map URL: {player_map_url}")
+    socketio_emit('state_update', state_to_send, to=request.sid)
 
 @socketio.on('gm_update')
 def handle_gm_update(data):
-    if not isinstance(data, dict) or 'session_id' not in data or 'update_data' not in data: return
-    session_id = data['session_id']
-    update_delta = data['update_data']
-    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id): print(f"Error: GM update received with invalid session ID: {session_id}"); return
-    if session_id not in session_states: print(f"Creating new session state for ID: {session_id}"); session_states[session_id] = get_default_session_state()
-    print(f"Received GM update for session {session_id}: {json.dumps(update_delta)}")
+    """Handles partial state updates received from the GM client."""
+    if not isinstance(data, dict) or 'session_id' not in data or 'update_data' not in data: logging.warning("Invalid GM update."); return
+    session_id = data['session_id']; update_delta = data['update_data']
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id): logging.error(f"GM update invalid ID: {session_id}"); return
+    # *** Use updated get_default_session_state when creating ***
+    if session_id not in session_states:
+        logging.warning(f"GM update for non-existent session {session_id}. Creating default state.")
+        session_states[session_id] = get_default_session_state()
+    logging.debug(f"Received GM update session {session_id}: {json.dumps(update_delta)}")
     try:
-        current_state = copy.deepcopy(session_states[session_id]); new_content_path = update_delta.get('map_content_path')
-        if new_content_path and new_content_path != current_state.get('map_content_path'):
-            map_filename = os.path.basename(new_content_path); map_path_on_disk = os.path.join(app.config['MAPS_FOLDER'], secure_filename(map_filename))
-            if os.path.exists(map_path_on_disk) and allowed_map_file(map_filename):
+        current_authoritative_state = session_states[session_id]
+        original_map_path_before_update = current_authoritative_state.get('original_map_path')
+        fog_changed = 'fog_of_war' in update_delta # Check if fog data is in the delta
+        new_original_map_path = update_delta.get('map_content_path'); map_changed = False; state_to_merge_into = current_authoritative_state
+        if new_original_map_path and new_original_map_path != original_map_path_before_update: # Map change check
+            map_filename = os.path.basename(new_original_map_path); map_path_on_disk = os.path.join(app.config['MAPS_FOLDER'], secure_filename(map_filename))
+            if os.path.exists(map_path_on_disk) and allowed_map_file(map_filename): # Validate map
                 new_map_state = get_state_for_map(map_filename)
-                if new_map_state: current_state = new_map_state; print(f"Session {session_id}: Reset state based on map '{map_filename}'.")
-                else: print(f"Warning: Could not generate state for map '{map_filename}'."); return
-            else: print(f"Warning: New content path invalid: '{new_content_path}'."); return
-        elif new_content_path is None and 'map_content_path' in update_delta: current_state = get_default_session_state()
-        updated_state = merge_dicts(current_state, update_delta); updated_state['display_type'] = 'image'
-        session_states[session_id] = updated_state; print(f"Session {session_id}: State updated. Broadcasting.")
-        socketio.emit('state_update', updated_state, room=session_id)
-    except Exception as e: print(f"Error processing GM update for session {session_id}: {e}"); traceback.print_exc()
+                if new_map_state: state_to_merge_into = new_map_state; logging.info(f"Session {session_id}: Loaded state new map '{map_filename}'."); map_changed = True
+                else: logging.error(f"Session {session_id}: Could not load state map '{map_filename}'."); return
+            else: logging.warning(f"Session {session_id}: GM sent invalid map path '{new_original_map_path}'."); return
+        elif new_original_map_path is None and 'map_content_path' in update_delta: # Map reset check
+            state_to_merge_into = get_default_session_state(); logging.info(f"Session {session_id}: Map reset."); map_changed = True
+        if not map_changed: # Merge delta
+            update_delta_copy = copy.deepcopy(update_delta); update_delta_copy.pop('map_content_path', None); updated_state = merge_dicts(state_to_merge_into, update_delta_copy)
+        else: updated_state = merge_dicts(state_to_merge_into, update_delta)
+        if map_changed: updated_state['original_map_path'] = new_original_map_path # Update original path
+        else: updated_state['original_map_path'] = original_map_path_before_update # Preserve original path
+        updated_state['display_type'] = 'image' # Ensure type
+
+        player_map_url = None; regenerate_image = map_changed or fog_changed # Regenerate if map OR fog changed
+        if regenerate_image and updated_state.get('original_map_path'):
+            logging.info(f"Regenerating map image for session {session_id} because map_changed={map_changed} or fog_changed={fog_changed}")
+            player_map_url = generate_player_map(session_id, updated_state)
+        elif updated_state.get('original_map_path'): # Reuse existing map URL
+            player_map_url = current_authoritative_state.get('map_content_path')
+            logging.debug(f"Reusing existing map image URL for session {session_id}: {player_map_url}")
+            if player_map_url: # Check if reused file exists
+                 filename_only = os.path.basename(player_map_url); filepath = os.path.join(app.config['GENERATED_MAPS_FOLDER'], secure_filename(filename_only))
+                 if not os.path.exists(filepath):
+                      logging.warning(f"Reused map URL file missing ({filepath}), forcing regeneration."); player_map_url = generate_player_map(session_id, updated_state)
+            else: player_map_url = generate_player_map(session_id, updated_state) # Generate if no previous URL
+
+        updated_state['map_content_path'] = player_map_url # Update authoritative state with URL for next time
+        session_states[session_id] = updated_state
+        logging.debug(f"Session {session_id}: Authoritative state updated.")
+
+        state_to_send = copy.deepcopy(updated_state); state_to_send['map_content_path'] = player_map_url # Prepare state to send NOW
+        state_to_send.pop('original_map_path', None)
+        if player_map_url: logging.info(f"Broadcasting update session {session_id} with map URL: {player_map_url}")
+        else: logging.warning(f"Broadcasting update session {session_id} with null map path.")
+        socketio_emit('state_update', state_to_send, room=session_id); logging.debug(f"Session {session_id}: Broadcasted state_update.")
+    except Exception as e: logging.error(f"Error processing GM update session {session_id}: {e}", exc_info=True)
+
 
 # --- Main Execution ---
 if __name__ == '__main__':
+    cleanup_generated_maps() # Clear old maps on start
+    with app.app_context(): print("--- Registered URL Routes ---\n", app.url_map, "\n-----------------------------")
     print("------------------------------------------")
-    print("Starting Dynamic Map Renderer server...")
-    print("Backend version: 2.5.2 (Hardcoded Session ID - Verified)") # Version updated
-    print(f"Serving map images from: {app.config['MAPS_FOLDER']}")
-    print(f"Using configs from: {app.config['CONFIGS_FOLDER']}")
-    print(f"Loading filters from: {app.config['FILTERS_FOLDER']}")
-    print("Access GM View: http://127.0.0.1:5000/")
-    print("Access Player View: http://127.0.0.1:5000/player?session=my-game") # Example
+    print(" Starting Dynamic Map Renderer server... ")
+    print(" Backend version: 2.7.15 (Fog of War - Stage C: Default Help Map State) ") # Version updated
+    print(f" Serving map images from: {app.config['MAPS_FOLDER']}")
+    print(f" Using configs from:      {app.config['CONFIGS_FOLDER']}")
+    print(f" Loading filters from:    {app.config['FILTERS_FOLDER']}")
+    print(f" Saving generated images to:    {app.config['GENERATED_MAPS_FOLDER']}")
+    print("------------------------------------------")
+    print(" Access GM View: http://127.0.0.1:5000/ ")
+    print(" Access Player View Example: http://127.0.0.1:5000/player?session=my-game ")
     print("------------------------------------------")
     socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)
-
-# --- Removed duplicated placeholder implementations ---
 

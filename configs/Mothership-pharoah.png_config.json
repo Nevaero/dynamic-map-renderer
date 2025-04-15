@@ -10,17 +10,23 @@
       "brightness": 1,
       "chromaticAberration": 0,
       "contrast": 1.2,
-      "crtWarp": 0.03,
-      "distortion": 0,
-      "flicker": 0,
+      "crtWarp": 0.015,
+      "distortion": 0.002,
+      "flicker": 0.06,
+      "ghostDistance": -25,
+      "ghostIntensity": 0.19,
       "humBarIntensity": 0,
       "interference": 0,
       "invertColors": 0,
+      "noiseBarSpeed": 0.85,
+      "noiseBarWidth": 3.5,
       "pictureRoll": 0,
       "roundedCorners": 0.05,
-      "scanlineIntensity": 0.1,
+      "scanlineIntensity": 0.73,
+      "scanlineThickness": 5,
       "skew": 0,
       "staticAmount": 0.05,
+      "tearFrequency": 0,
       "vignetteAmount": 0.5,
       "wobbleAmplitude": 0,
       "wobbleFrequency": 5,
@@ -33,25 +39,57 @@
       "crtWarp": 0.03,
       "distortion": 0,
       "flicker": 0,
+      "ghostDistance": 0,
+      "ghostIntensity": 0,
+      "ghosting": 0,
       "greenTint": 0.8,
       "humBarIntensity": 0,
       "interference": 0,
       "invertColors": 0,
+      "noiseBarSpeed": 0,
+      "noiseBarWidth": 0,
       "pictureRoll": 0,
+      "rollLineSpeed": 0,
+      "rollLineWidth": 0,
+      "rotation": 0,
       "roundedCorners": 0.05,
       "scanlineIntensity": 0.1,
+      "scanlineThickness": 3,
       "skew": 0,
       "staticAmount": 0.05,
+      "tearFrequency": 0,
       "vignetteAmount": 0.5,
       "wobbleAmplitude": 0,
       "wobbleFrequency": 5,
       "wobbleSpeed": 1
     }
   },
+  "fog_of_war": {
+    "hidden_polygons": [
+      {
+        "color": "#ffffFF",
+        "id": "poly_1744184765920_2uq6g",
+        "vertices": [
+          {
+            "x": 0.984652788330041,
+            "y": 0.25895762668090017
+          },
+          {
+            "x": 0.9431006616844635,
+            "y": 0.26777320546152655
+          },
+          {
+            "x": 0.984652788330041,
+            "y": 0.31515694140739337
+          }
+        ]
+      }
+    ]
+  },
   "map_content_path": "maps/Mothership-pharoah.png",
   "view_state": {
     "center_x": 0.5,
     "center_y": 0.5,
-    "scale": 0.95
+    "scale": 1
   }
 }

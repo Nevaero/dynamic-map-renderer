@@ -14,8 +14,6 @@
 
     <div class="main-content">
         <aside class="controls-panel">
-            <h2>Controls</h2>
-
             <div class="gm-controls">
                 <label for="map-select">Select Map:</label>
                 <select id="map-select">
@@ -32,13 +30,15 @@
                  </form>
             </div>
 
-            <div class="gm-controls">
-                <label for="filter-select">Select Filter:</label>
-                <select id="filter-select">
-                    </select>
+             <div class="gm-controls fog-controls">
+                <fieldset> <legend>Masking / Fog of War</legend>
+                    <button id="toggle-fog-drawing-button" disabled>Draw New Polygons</button> <div style="margin-top: 5px;">
+                        <label for="fog-color-display">Current Color:</label>
+                        <span id="fog-color-display" title="Last used polygon color"></span>
+                    </div>
+                    <p style="font-size: 0.8em; margin-top: 5px; color: #555;">Click map to draw, click near start to close. Click polygon to delete/recolour. Colour is selected from image.</p>
+                </fieldset>
             </div>
-
-            <div id="filter-controls" class="gm-controls filter-controls"></div>
 
             <div class="gm-controls">
                 <fieldset> <legend>Player View Control</legend>
@@ -50,9 +50,16 @@
                     <input type="range" id="view-scale" min="0.1" max="5" step="0.05" value="1.0" disabled>
                 </fieldset>
             </div>
-
+			</p>
+			<h3>Visual Filter Controls:</h3>
+			
             <div class="gm-controls">
-                <button id="save-button" title="Save the current settings to this map's configuration file">Save Map Config</button>
+                <label for="filter-select">Select Filter:</label>
+                <select id="filter-select">
+                    </select> </div>
+
+            <div id="filter-controls" class="gm-controls filter-controls">
+                 <p>Select map and filter first.</p>
             </div>
 
             <div class="session-info">
@@ -66,14 +73,21 @@
         </aside>
 
         <main class="map-view-panel">
-             <h2>GM Preview Area</h2>
              <div id="gm-map-display" style="display: none;">
                  <img id="gm-map-image" src="" alt="Selected Map Preview" style="display: none;">
+                 <svg id="gm-svg-overlay"></svg>
+                 <div id="fog-interaction-popup">
+                     <button id="fog-delete-button" title="Delete selected polygon (Del/Backspace)">Delete</button>
+                     <button id="fog-color-button" title="Change color (Eyedropper)">Color</button>
+                 </div>
              </div>
              <p id="gm-map-placeholder" style="margin-top: 20px; color: #666;">Select a map to start.</p>
         </main>
     </div>
 
+    <canvas id="eyedropper-canvas"></canvas>
+
     <script src="{{ url_for('static', filename='js/gm.js') }}"></script>
 </body>
 </html>
+

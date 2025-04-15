@@ -1,0 +1,107 @@
+{
+  "current_filter": "retro_sci_fi_green",
+  "display_type": "image",
+  "filter_params": {
+    "none": {
+      "invertDisplay": 0
+    },
+    "retro_sci_fi_amber": {
+      "amberTint": 0.8,
+      "brightness": 1,
+      "chromaticAberration": 0,
+      "contrast": 1.2,
+      "crtWarp": 0.03,
+      "distortion": 0,
+      "flicker": 0,
+      "ghostDistance": 0,
+      "ghostIntensity": 0,
+      "interference": 0,
+      "invertColors": 0,
+      "noiseBarSpeed": 0,
+      "noiseBarWidth": 0,
+      "pictureRoll": 0,
+      "roundedCorners": 0.05,
+      "scanlineIntensity": 0.4,
+      "scanlineThickness": 3,
+      "skew": 0.5,
+      "tearFrequency": 0,
+      "vignetteAmount": 0.5
+    },
+    "retro_sci_fi_green": {
+      "brightness": 1.65,
+      "chromaticAberration": 0,
+      "contrast": 1.05,
+      "crtWarp": 0,
+      "distortion": 0.003,
+      "flicker": 0,
+      "ghostDistance": 0,
+      "ghostIntensity": 0,
+      "greenTint": 0.85,
+      "interference": 0.56,
+      "invertColors": 1,
+      "noiseBarSpeed": 0,
+      "noiseBarWidth": 0,
+      "pictureRoll": 0,
+      "roundedCorners": 0.15,
+      "scanlineIntensity": 0.4,
+      "scanlineThickness": 3,
+      "skew": -0.12,
+      "tearFrequency": 0,
+      "vignetteAmount": 0.75
+    }
+  },
+  "fog_of_war": {
+    "hidden_polygons": [
+      {
+        "color": "#ffffFF",
+        "id": "poly_1744753898846_59ich",
+        "vertices": [
+          {
+            "x": 0.08144575171919304,
+            "y": 0.04316907244309969
+          },
+          {
+            "x": 0.9213462395028734,
+            "y": 0.046869278652508235
+          },
+          {
+            "x": 0.9359471585785831,
+            "y": 0.2775154657056409
+          },
+          {
+            "x": 0.0828363154406892,
+            "y": 0.27381525949623237
+          }
+        ]
+      },
+      {
+        "id": "poly_1744754608789_7iha4",
+        "color": "#ffffFF",
+        "vertices": [
+          {
+            "x": 0.0011090945755192578,
+            "y": 0.46344679614688333
+          },
+          {
+            "x": 0.9972776769509982,
+            "y": 0.44914288268555974
+          },
+          {
+            "x": 0.9964710627142569,
+            "y": 0.9941219855619874
+          },
+          {
+            "x": 0.0019157088122605363,
+            "y": 0.9912612028697226
+          }
+        ]
+      }
+    ]
+  },
+  "map_content_path": "maps/Help.png",
+  "view_state": {
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "scale": 1
+  }
+}
