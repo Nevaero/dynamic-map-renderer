@@ -34,7 +34,7 @@ This project has been "Vibe coded" - a dirty word for many. This means that whil
 ## Setup Instructions
 
 You will need a working Python 3.xx environment to use this. Further dependencies installed in step 3.
-You can skip Step 1 and 2 if you just want to download and unzip the "release zip" file. 
+You can skip Step 1 and 2 if you just want to download the "Code -> Download ZIP file". 
 
 1.  **Clone the Repository:**
     ```bash
