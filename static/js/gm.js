@@ -25,6 +25,35 @@ const FOG_VERTEX_CLOSING_THRESHOLD = 10;
 const FOG_DEFAULT_COLOR = '#000000';
 let lastFogColor = FOG_DEFAULT_COLOR;
 
+// --- Drag-and-Drop State ---
+let isDragging = false;
+let dragStartSvgPoint = null;
+let dragPolygonOriginalVertices = null;
+let dragJustCompleted = false;
+const DRAG_THRESHOLD = 5; // px to distinguish click from drag
+
+// --- Vertex Editing State ---
+let editingVertexIndex = null;       // Index of vertex being dragged
+let editingVertexOriginalPos = null;  // {x, y} for cancel/revert
+let svgVertexHandlesLayer = null;
+
+// --- Resize Handle State ---
+let resizingCornerIndex = null;      // 0-3 for which corner is being dragged
+let resizeOriginalVertices = null;    // deep copy of all vertices before resize
+let resizeAnchorCorner = null;       // the fixed opposite corner {x,y} normalized
+let resizeShapeType = null;          // shape type of the polygon being resized
+
+// --- Undo/Redo State ---
+const fogUndoStack = [];
+const fogRedoStack = [];
+const FOG_UNDO_MAX = 50;
+let pendingUndoSnapshot = null; // holds pre-drag state, committed on mouseup
+
+// --- Shape Tool State ---
+let currentShapeTool = null; // null = freehand, or 'circle','ellipse','square','rectangle','triangle'
+let shapeAnchorPoint = null; // normalized {x,y} of mousedown
+let shapePreviewElement = null; // SVG polygon for live preview
+
 // --- Auto-Save State ---
 let debounceTimer = null;
 const DEBOUNCE_DELAY = 1500;
@@ -32,7 +61,6 @@ const DEBOUNCE_DELAY = 1500;
 // --- DOM Elements ---
 const filterSelect = document.getElementById('filter-select');
 const mapSelect = document.getElementById('map-select');
-const playerUrlDisplay = document.getElementById('player-url-display');
 const gmMapDisplay = document.getElementById('gm-map-display');
 const gmMapImage = document.getElementById('gm-map-image');
 const gmMapPlaceholder = document.getElementById('gm-map-placeholder');
@@ -40,8 +68,14 @@ const filterControlsContainer = document.getElementById('filter-controls');
 const mapUploadForm = document.getElementById('map-upload-form');
 const mapFileInput = document.getElementById('map-file-input');
 const uploadStatus = document.getElementById('upload-status');
-const copyPlayerUrlButton = document.getElementById('copy-player-url');
-const copyStatusDisplay = document.getElementById('copy-status');
+const lanPlayerUrlDisplay = document.getElementById('lan-player-url-display');
+const copyLanPlayerUrlButton = document.getElementById('copy-lan-player-url');
+const lanCopyStatusDisplay = document.getElementById('lan-copy-status');
+const showQrCodeButton = document.getElementById('show-qr-code');
+const qrModal = document.getElementById('qr-modal');
+const qrModalClose = document.getElementById('qr-modal-close');
+const qrCodeContainer = document.getElementById('qr-code-container');
+const qrModalUrl = document.getElementById('qr-modal-url');
 const viewXInput = document.getElementById('view-center-x');
 const viewYInput = document.getElementById('view-center-y');
 const viewScaleInput = document.getElementById('view-scale');
@@ -51,6 +85,7 @@ const fogInteractionPopup = document.getElementById('fog-interaction-popup');
 const fogDeleteButton = document.getElementById('fog-delete-button');
 const fogColorButton = document.getElementById('fog-color-button');
 svgOverlay = document.getElementById('gm-svg-overlay');
+const shapeToolsContainer = document.getElementById('shape-tools-container');
 const eyedropperCanvas = document.getElementById('eyedropper-canvas');
 const eyedropperCtx = eyedropperCanvas ? eyedropperCanvas.getContext('2d', { willReadFrequently: true }) : null;
 const mapViewPanel = document.querySelector('.map-view-panel');
@@ -87,7 +122,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // *** END ADDED ***
 
         console.log("Setting up UI, WebSocket, Listeners...");
-        updatePlayerUrlDisplay(); // Update URL display initially
+        fetchLanInfo(); // Fetch and display LAN player URL
         connectWebSocket();
         setupEventListeners();
         // resetUI(); // resetUI is now called conditionally above or within loadMapDataForGM
@@ -110,6 +145,9 @@ function setupSvgLayers() {
     svgCompletedLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svgCompletedLayer.id = 'fog-completed-layer';
     svgOverlay.appendChild(svgCompletedLayer);
+    svgVertexHandlesLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    svgVertexHandlesLayer.id = 'fog-vertex-handles-layer';
+    svgOverlay.appendChild(svgVertexHandlesLayer);
     svgDrawingLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svgDrawingLayer.id = 'fog-drawing-layer';
     svgOverlay.appendChild(svgDrawingLayer);
@@ -281,6 +319,25 @@ function resetUI() {
     isCurrentlyDrawingPolygon = false;
     currentFogPolygonVertices = [];
     selectedPolygonId = null;
+    // Reset drag/shape/vertex/resize state
+    isDragging = false;
+    dragStartSvgPoint = null;
+    dragPolygonOriginalVertices = null;
+    dragJustCompleted = false;
+    editingVertexIndex = null;
+    editingVertexOriginalPos = null;
+    resizingCornerIndex = null;
+    resizeOriginalVertices = null;
+    resizeAnchorCorner = null;
+    resizeShapeType = null;
+    currentShapeTool = null;
+    shapeAnchorPoint = null;
+    // Clear undo/redo stacks
+    fogUndoStack.length = 0;
+    fogRedoStack.length = 0;
+    pendingUndoSnapshot = null;
+    cleanupShapePreview();
+    if (shapeToolsContainer) shapeToolsContainer.style.display = 'none';
     if (svgOverlay) {
         svgOverlay.innerHTML = '';
         setupSvgLayers();
@@ -511,14 +568,24 @@ function setupEventListeners() {
     else console.error("viewYInput missing!");
     if (viewScaleInput) viewScaleInput.addEventListener('input', handleViewChange);
     else console.error("viewScaleInput missing!");
-    if (copyPlayerUrlButton) copyPlayerUrlButton.addEventListener('click', copyPlayerUrlToClipboard);
-    else console.error("copyPlayerUrlButton missing!");
+    if (copyLanPlayerUrlButton) copyLanPlayerUrlButton.addEventListener('click', copyLanPlayerUrlToClipboard);
+    if (showQrCodeButton) showQrCodeButton.addEventListener('click', openQrModal);
+    if (qrModalClose) qrModalClose.addEventListener('click', closeQrModal);
+    if (qrModal) qrModal.addEventListener('click', function(e) { if (e.target === qrModal) closeQrModal(); });
     if (toggleFogDrawingButton) toggleFogDrawingButton.addEventListener('click', handleToggleFogDrawing);
     else console.error("toggleFogDrawingButton missing!");
     if (svgOverlay) {
         svgOverlay.addEventListener('click', handleSvgClick);
         svgOverlay.addEventListener('mousemove', handleSvgMouseMove);
+        svgOverlay.addEventListener('mousedown', handleSvgMouseDown);
+        svgOverlay.addEventListener('mouseup', handleSvgMouseUp);
     } else console.error("svgOverlay missing!");
+    // Shape tool buttons
+    if (shapeToolsContainer) {
+        shapeToolsContainer.querySelectorAll('.shape-tool-btn').forEach(btn => {
+            btn.addEventListener('click', handleShapeToolSelect);
+        });
+    }
     document.addEventListener('keydown', handleKeyDown);
     if (fogDeleteButton) fogDeleteButton.addEventListener('click', handleDeletePolygon);
     else console.error("fogDeleteButton missing!");
@@ -678,36 +745,6 @@ function handleViewChange(event) {
     }
 }
 
-function copyPlayerUrlToClipboard() {
-    console.log("Copying player URL...");
-    if (!playerUrlDisplay) return;
-    playerUrlDisplay.select();
-    playerUrlDisplay.setSelectionRange(0, 99999);
-    try {
-        if (!document.execCommand('copy')) throw new Error('execCommand failed');
-        copyStatusDisplay.textContent = 'Copied!';
-        copyStatusDisplay.style.color = 'green';
-    } catch (err) {
-        console.error('Copy failed:', err);
-        copyStatusDisplay.textContent = 'Copy failed.';
-        copyStatusDisplay.style.color = 'red';
-        if (navigator.clipboard) {
-            navigator.clipboard.writeText(playerUrlDisplay.value).then(() => {
-                copyStatusDisplay.textContent = 'Copied!';
-                copyStatusDisplay.style.color = 'green';
-            }).catch(clipErr => {
-                console.error('Clipboard fallback failed:', clipErr);
-                copyStatusDisplay.textContent = 'Copy failed.';
-                copyStatusDisplay.style.color = 'red';
-            });
-        }
-    }
-    setTimeout(() => {
-        copyStatusDisplay.textContent = '';
-    }, 2500);
-}
-
-
 // --- Fog of War Handlers ---
 
 // Toggle Logic (Unchanged)
@@ -718,11 +755,20 @@ function handleToggleFogDrawing() {
             deselectPolygon();
         }
         setInteractionMode('drawing_enabled');
+        // Show shape tools, reset to freehand
+        if (shapeToolsContainer) shapeToolsContainer.style.display = 'flex';
+        setActiveShapeTool(null);
     } else {
         if (currentInteractionMode === 'drawing_polygon') {
             cancelCurrentPolygon();
         }
+        if (currentInteractionMode === 'drawing_shape') {
+            cancelCurrentShape();
+        }
         setInteractionMode('idle');
+        // Hide shape tools
+        if (shapeToolsContainer) shapeToolsContainer.style.display = 'none';
+        currentShapeTool = null;
     }
 }
 // Interaction Mode Setter (Unchanged)
@@ -730,7 +776,7 @@ function setInteractionMode(mode) {
     if (currentInteractionMode === mode) return;
     console.log(`Switching Mode: ${currentInteractionMode} -> ${mode}`);
     currentInteractionMode = mode;
-    svgOverlay.classList.remove('drawing-active', 'eyedropper-active');
+    svgOverlay.classList.remove('drawing-active', 'eyedropper-active', 'dragging-active');
     if (fogInteractionPopup) fogInteractionPopup.style.display = 'none';
     switch (mode) {
         case 'idle':
@@ -750,10 +796,20 @@ function setInteractionMode(mode) {
             isCurrentlyDrawingPolygon = true;
             svgOverlay.classList.add('drawing-active');
             break;
+        case 'drawing_shape':
+            isDrawingFogEnabled = true;
+            svgOverlay.classList.add('drawing-active');
+            break;
+        case 'dragging_polygon':
+            svgOverlay.classList.add('drawing-active', 'dragging-active');
+            break;
         case 'polygon_selected':
             isDrawingFogEnabled = false;
             if (toggleFogDrawingButton) toggleFogDrawingButton.textContent = "Draw New Polygons";
             svgOverlay.classList.add('drawing-active');
+            break;
+        case 'editing_vertex':
+            svgOverlay.classList.add('drawing-active', 'dragging-active');
             break;
         case 'eyedropper_active':
             isDrawingFogEnabled = false;
@@ -766,7 +822,14 @@ function setInteractionMode(mode) {
 function handleKeyDown(event) {
     switch (event.key) {
         case 'Escape':
-            if (currentInteractionMode === 'drawing_polygon') cancelCurrentPolygon();
+            if (currentInteractionMode === 'editing_vertex') {
+                // Check if we're resizing or vertex-editing
+                if (resizingCornerIndex !== null) cancelResizeDrag();
+                else cancelVertexDrag();
+            }
+            else if (currentInteractionMode === 'dragging_polygon') cancelDrag();
+            else if (currentInteractionMode === 'drawing_shape') cancelCurrentShape();
+            else if (currentInteractionMode === 'drawing_polygon') cancelCurrentPolygon();
             else if (currentInteractionMode === 'polygon_selected') deselectPolygon();
             else if (currentInteractionMode === 'eyedropper_active') {
                 setInteractionMode('polygon_selected');
@@ -776,6 +839,23 @@ function handleKeyDown(event) {
         case 'Delete':
         case 'Backspace':
             if (currentInteractionMode === 'polygon_selected' && selectedPolygonId) handleDeletePolygon();
+            break;
+        case 'z':
+        case 'Z':
+            if (event.ctrlKey && !event.shiftKey) {
+                event.preventDefault();
+                fogUndo();
+            } else if (event.ctrlKey && event.shiftKey) {
+                event.preventDefault();
+                fogRedo();
+            }
+            break;
+        case 'y':
+        case 'Y':
+            if (event.ctrlKey) {
+                event.preventDefault();
+                fogRedo();
+            }
             break;
     }
 }
@@ -790,7 +870,14 @@ function cancelCurrentPolygon() {
 // Main SVG Click Router (Unchanged)
 function handleSvgClick(event) {
     if (!currentMapFilename || !gmMapRect) return;
+    // Guard: if a drag just completed, the click event fires right after mouseup — skip it
+    if (dragJustCompleted) {
+        dragJustCompleted = false;
+        return;
+    }
     const target = event.target;
+    // Skip click if it's on a vertex/resize handle (handled by mousedown)
+    if (target.closest('.fog-vertex-handle') || target.closest('.fog-resize-handle')) return;
     const clickedOnPolygonElement = target.closest('.fog-polygon-complete');
     console.log(`SVG Click - Mode: ${currentInteractionMode}, Target:`, target);
     switch (currentInteractionMode) {
@@ -806,11 +893,12 @@ function handleSvgClick(event) {
             break;
         case 'drawing_enabled':
             if (clickedOnPolygonElement) handlePolygonSelect(event);
-            else startOrContinueDrawing(event);
+            else if (!currentShapeTool) startOrContinueDrawing(event); // freehand only when no shape tool
             break;
         case 'drawing_polygon':
             startOrContinueDrawing(event);
             break;
+        // drawing_shape and dragging_polygon are handled via mousedown/mouseup, not click
     }
 }
 // Start/Continue Drawing (Unchanged)
@@ -845,6 +933,729 @@ function handleSvgMouseMove(event) {
         const existingRubberBand = svgDrawingLayer?.querySelector('.fog-polygon-rubberband');
         if (existingRubberBand) existingRubberBand.remove();
     }
+    // Shape drawing preview is handled in handleDocumentMouseMoveShape
+    // Drag is handled in handleDocumentMouseMoveDrag
+}
+
+// --- Drag-and-Drop Handlers ---
+
+function handleSvgMouseDown(event) {
+    if (!currentMapFilename || !gmMapRect) return;
+    const target = event.target;
+
+    // --- Vertex handle: start vertex drag ---
+    const clickedVertexHandle = target.closest('.fog-vertex-handle');
+    if (clickedVertexHandle && selectedPolygonId && currentInteractionMode === 'polygon_selected') {
+        event.preventDefault();
+        const vertexIndex = parseInt(clickedVertexHandle.dataset.vertexIndex, 10);
+        if (!isNaN(vertexIndex)) {
+            startVertexDrag(event, vertexIndex);
+            return;
+        }
+    }
+
+    // --- Resize handle: start resize drag ---
+    const clickedResizeHandle = target.closest('.fog-resize-handle');
+    if (clickedResizeHandle && selectedPolygonId && currentInteractionMode === 'polygon_selected') {
+        event.preventDefault();
+        const cornerIndex = parseInt(clickedResizeHandle.dataset.cornerIndex, 10);
+        if (!isNaN(cornerIndex)) {
+            startResizeDrag(event, cornerIndex);
+            return;
+        }
+    }
+
+    const clickedPolygon = target.closest('.fog-polygon-complete');
+
+    // --- Shape tool: start drawing shape ---
+    if (currentShapeTool && (currentInteractionMode === 'drawing_enabled') && !clickedPolygon) {
+        event.preventDefault();
+        const svgPoint = getSvgCoordinates(event);
+        if (!svgPoint) return;
+        shapeAnchorPoint = svgToRelativeCoords(svgPoint);
+        if (!shapeAnchorPoint) return;
+        setInteractionMode('drawing_shape');
+        // Create preview element
+        shapePreviewElement = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        shapePreviewElement.setAttribute('class', 'fog-shape-preview');
+        svgDrawingLayer.appendChild(shapePreviewElement);
+        // Attach document-level listeners for shape drawing
+        document.addEventListener('mousemove', handleDocumentMouseMoveShape);
+        document.addEventListener('mouseup', handleDocumentMouseUpShape);
+        return;
+    }
+
+    // --- Drag: start potential drag on a completed polygon ---
+    if (clickedPolygon && currentInteractionMode !== 'eyedropper_active' && currentInteractionMode !== 'drawing_polygon' && currentInteractionMode !== 'drawing_shape') {
+        event.preventDefault();
+        const polygonId = clickedPolygon.dataset.polygonId;
+        const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === polygonId);
+        if (!polygonData) return;
+
+        const svgPoint = getSvgCoordinates(event);
+        if (!svgPoint) return;
+
+        isDragging = false; // not yet — waiting for threshold
+        dragStartSvgPoint = svgPoint;
+        dragPolygonOriginalVertices = polygonData.vertices.map(v => ({ x: v.x, y: v.y }));
+
+        // Select this polygon
+        deselectPolygon(false);
+        selectedPolygonId = polygonId;
+        clickedPolygon.classList.add('fog-polygon-selected');
+
+        // Attach document-level listeners
+        document.addEventListener('mousemove', handleDocumentMouseMoveDrag);
+        document.addEventListener('mouseup', handleDocumentMouseUpDrag);
+    }
+}
+
+function handleSvgMouseUp(event) {
+    // Most mouseup logic is handled by the document-level listeners
+}
+
+// --- Drag document-level handlers ---
+
+function handleDocumentMouseMoveDrag(event) {
+    if (!selectedPolygonId || !dragStartSvgPoint) return;
+    const svgRect = svgOverlay.getBoundingClientRect();
+    const currentSvgPoint = {
+        x: event.clientX - svgRect.left,
+        y: event.clientY - svgRect.top
+    };
+
+    const dx = currentSvgPoint.x - dragStartSvgPoint.x;
+    const dy = currentSvgPoint.y - dragStartSvgPoint.y;
+
+    if (!isDragging) {
+        // Check threshold
+        if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+        isDragging = true;
+        capturePendingUndo();
+        setInteractionMode('dragging_polygon');
+    }
+
+    // Translate vertices: compute delta in normalized coords
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (!polygonData || !dragPolygonOriginalVertices) return;
+
+    // Convert pixel delta to normalized delta
+    const imageOffsetX = gmMapRect.left - gmMapDisplayRect.left;
+    const imageOffsetY = gmMapRect.top - gmMapDisplayRect.top;
+    const normDx = dx / gmMapRect.width;
+    const normDy = dy / gmMapRect.height;
+
+    for (let i = 0; i < polygonData.vertices.length; i++) {
+        polygonData.vertices[i].x = dragPolygonOriginalVertices[i].x + normDx;
+        polygonData.vertices[i].y = dragPolygonOriginalVertices[i].y + normDy;
+    }
+
+    updatePolygonSvgPosition(polygonData);
+}
+
+function handleDocumentMouseUpDrag(event) {
+    document.removeEventListener('mousemove', handleDocumentMouseMoveDrag);
+    document.removeEventListener('mouseup', handleDocumentMouseUpDrag);
+
+    if (isDragging && selectedPolygonId) {
+        // Clamp all vertices to [0,1]
+        const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygonData) {
+            polygonData.vertices.forEach(v => {
+                v.x = clampNorm(v.x);
+                v.y = clampNorm(v.y);
+            });
+            updatePolygonSvgPosition(polygonData);
+        }
+
+        // Send update
+        commitPendingUndo();
+        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        debouncedAutoSave();
+        console.log("Polygon drag completed.");
+
+        dragJustCompleted = true;
+        isDragging = false;
+        dragStartSvgPoint = null;
+        dragPolygonOriginalVertices = null;
+
+        // Go to polygon_selected mode
+        setInteractionMode('polygon_selected');
+        // Refresh vertex handles after drag
+        if (polygonData) showVertexHandles(polygonData);
+    } else {
+        // Was not a real drag (below threshold) — treat as a select click
+        isDragging = false;
+        dragStartSvgPoint = null;
+        dragPolygonOriginalVertices = null;
+
+        if (selectedPolygonId) {
+            setInteractionMode('polygon_selected');
+            showInteractionPopup(event);
+            // Show vertex handles for the selected polygon
+            const selData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+            if (selData) showVertexHandles(selData);
+        }
+    }
+}
+
+function cancelDrag() {
+    if (!isDragging || !selectedPolygonId || !dragPolygonOriginalVertices) return;
+    // Revert vertices
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (polygonData) {
+        for (let i = 0; i < polygonData.vertices.length; i++) {
+            polygonData.vertices[i].x = dragPolygonOriginalVertices[i].x;
+            polygonData.vertices[i].y = dragPolygonOriginalVertices[i].y;
+        }
+        updatePolygonSvgPosition(polygonData);
+    }
+
+    document.removeEventListener('mousemove', handleDocumentMouseMoveDrag);
+    document.removeEventListener('mouseup', handleDocumentMouseUpDrag);
+    isDragging = false;
+    dragStartSvgPoint = null;
+    dragPolygonOriginalVertices = null;
+    discardPendingUndo();
+    deselectPolygon();
+    console.log("Drag cancelled.");
+}
+
+function updatePolygonSvgPosition(polygonData) {
+    if (!svgCompletedLayer || !polygonData) return;
+    const el = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${polygonData.id}"]`);
+    if (!el) return;
+    const points = polygonData.vertices.map(p => {
+        const svgP = relativeToSvgCoords(p);
+        return svgP ? `${svgP.x},${svgP.y}` : null;
+    }).filter(p => p !== null).join(' ');
+    el.setAttribute('points', points);
+}
+
+// --- Vertex Editing Handlers ---
+
+function showVertexHandles(polygonData) {
+    hideVertexHandles();
+    if (!svgVertexHandlesLayer || !polygonData?.vertices) return;
+    // For circles/ellipses, show 4 resize handles instead of 48 vertex handles
+    if (polygonData.shapeType === 'circle' || polygonData.shapeType === 'ellipse') {
+        showResizeHandles(polygonData);
+        return;
+    }
+    polygonData.vertices.forEach((vertex, i) => {
+        const svgP = relativeToSvgCoords(vertex);
+        if (!svgP) return;
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', svgP.x);
+        circle.setAttribute('cy', svgP.y);
+        circle.setAttribute('r', 6);
+        circle.setAttribute('class', 'fog-vertex-handle');
+        circle.dataset.vertexIndex = i;
+        svgVertexHandlesLayer.appendChild(circle);
+    });
+}
+
+function showResizeHandles(polygonData) {
+    if (!svgVertexHandlesLayer || !polygonData?.vertices || polygonData.vertices.length === 0) return;
+    // Compute bounding box from vertices
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    polygonData.vertices.forEach(v => {
+        if (v.x < minX) minX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y > maxY) maxY = v.y;
+    });
+    const corners = [
+        { x: minX, y: minY },  // top-left (0)
+        { x: maxX, y: minY },  // top-right (1)
+        { x: maxX, y: maxY },  // bottom-right (2)
+        { x: minX, y: maxY },  // bottom-left (3)
+    ];
+    const cursors = ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize'];
+    corners.forEach((corner, i) => {
+        const svgP = relativeToSvgCoords(corner);
+        if (!svgP) return;
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', svgP.x);
+        circle.setAttribute('cy', svgP.y);
+        circle.setAttribute('r', 7);
+        circle.setAttribute('class', 'fog-resize-handle');
+        circle.dataset.cornerIndex = i;
+        circle.style.cursor = cursors[i];
+        svgVertexHandlesLayer.appendChild(circle);
+    });
+}
+
+function hideVertexHandles() {
+    if (svgVertexHandlesLayer) svgVertexHandlesLayer.innerHTML = '';
+}
+
+function startVertexDrag(event, vertexIndex) {
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (!polygonData || vertexIndex < 0 || vertexIndex >= polygonData.vertices.length) return;
+
+    editingVertexIndex = vertexIndex;
+    editingVertexOriginalPos = { x: polygonData.vertices[vertexIndex].x, y: polygonData.vertices[vertexIndex].y };
+    capturePendingUndo();
+    setInteractionMode('editing_vertex');
+
+    document.addEventListener('mousemove', handleDocumentMouseMoveVertex);
+    document.addEventListener('mouseup', handleDocumentMouseUpVertex);
+}
+
+function handleDocumentMouseMoveVertex(event) {
+    if (editingVertexIndex === null || !selectedPolygonId) return;
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (!polygonData) return;
+
+    const svgRect = svgOverlay.getBoundingClientRect();
+    const svgPoint = {
+        x: event.clientX - svgRect.left,
+        y: event.clientY - svgRect.top
+    };
+    const relPoint = svgToRelativeCoords(svgPoint);
+    if (!relPoint) return;
+
+    // Clamp to [0,1]
+    relPoint.x = clampNorm(relPoint.x);
+    relPoint.y = clampNorm(relPoint.y);
+
+    // Update the vertex position
+    polygonData.vertices[editingVertexIndex].x = relPoint.x;
+    polygonData.vertices[editingVertexIndex].y = relPoint.y;
+
+    // Update polygon SVG
+    updatePolygonSvgPosition(polygonData);
+
+    // Update just this vertex handle position
+    const handle = svgVertexHandlesLayer?.querySelector(`.fog-vertex-handle[data-vertex-index="${editingVertexIndex}"]`);
+    if (handle) {
+        const svgP = relativeToSvgCoords(relPoint);
+        if (svgP) {
+            handle.setAttribute('cx', svgP.x);
+            handle.setAttribute('cy', svgP.y);
+        }
+    }
+}
+
+function handleDocumentMouseUpVertex(event) {
+    document.removeEventListener('mousemove', handleDocumentMouseMoveVertex);
+    document.removeEventListener('mouseup', handleDocumentMouseUpVertex);
+
+    if (editingVertexIndex !== null && selectedPolygonId) {
+        // Finalize: clamp vertex
+        const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygonData && editingVertexIndex < polygonData.vertices.length) {
+            polygonData.vertices[editingVertexIndex].x = clampNorm(polygonData.vertices[editingVertexIndex].x);
+            polygonData.vertices[editingVertexIndex].y = clampNorm(polygonData.vertices[editingVertexIndex].y);
+            updatePolygonSvgPosition(polygonData);
+        }
+
+        commitPendingUndo();
+        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        debouncedAutoSave();
+        console.log("Vertex drag completed.");
+
+        editingVertexIndex = null;
+        editingVertexOriginalPos = null;
+
+        setInteractionMode('polygon_selected');
+        // Refresh all vertex handle positions
+        if (polygonData) showVertexHandles(polygonData);
+    } else {
+        editingVertexIndex = null;
+        editingVertexOriginalPos = null;
+        setInteractionMode('polygon_selected');
+    }
+
+    dragJustCompleted = true;
+}
+
+function cancelVertexDrag() {
+    if (editingVertexIndex === null || !selectedPolygonId || !editingVertexOriginalPos) {
+        editingVertexIndex = null;
+        editingVertexOriginalPos = null;
+        return;
+    }
+
+    // Revert vertex to original position
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (polygonData && editingVertexIndex < polygonData.vertices.length) {
+        polygonData.vertices[editingVertexIndex].x = editingVertexOriginalPos.x;
+        polygonData.vertices[editingVertexIndex].y = editingVertexOriginalPos.y;
+        updatePolygonSvgPosition(polygonData);
+    }
+
+    document.removeEventListener('mousemove', handleDocumentMouseMoveVertex);
+    document.removeEventListener('mouseup', handleDocumentMouseUpVertex);
+
+    editingVertexIndex = null;
+    editingVertexOriginalPos = null;
+    discardPendingUndo();
+
+    setInteractionMode('polygon_selected');
+    if (polygonData) showVertexHandles(polygonData);
+    console.log("Vertex drag cancelled.");
+}
+
+// --- Resize Drag Handlers ---
+
+function startResizeDrag(event, cornerIndex) {
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (!polygonData || !polygonData.shapeType) return;
+
+    resizingCornerIndex = cornerIndex;
+    resizeOriginalVertices = polygonData.vertices.map(v => ({ x: v.x, y: v.y }));
+    resizeShapeType = polygonData.shapeType;
+    capturePendingUndo();
+
+    // Compute bounding box to find anchor (opposite corner)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    polygonData.vertices.forEach(v => {
+        if (v.x < minX) minX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y > maxY) maxY = v.y;
+    });
+    const corners = [
+        { x: minX, y: minY },  // 0: top-left
+        { x: maxX, y: minY },  // 1: top-right
+        { x: maxX, y: maxY },  // 2: bottom-right
+        { x: minX, y: maxY },  // 3: bottom-left
+    ];
+    // Opposite corner index: 0<->2, 1<->3
+    const oppositeIndex = (cornerIndex + 2) % 4;
+    resizeAnchorCorner = corners[oppositeIndex];
+
+    setInteractionMode('editing_vertex');
+
+    document.addEventListener('mousemove', handleDocumentMouseMoveResize);
+    document.addEventListener('mouseup', handleDocumentMouseUpResize);
+}
+
+function handleDocumentMouseMoveResize(event) {
+    if (resizingCornerIndex === null || !selectedPolygonId || !resizeAnchorCorner) return;
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (!polygonData) return;
+
+    const svgRect = svgOverlay.getBoundingClientRect();
+    const currentSvgPoint = {
+        x: event.clientX - svgRect.left,
+        y: event.clientY - svgRect.top
+    };
+    const currentNorm = svgToRelativeCoords(currentSvgPoint);
+    if (!currentNorm) return;
+
+    // Regenerate shape vertices using anchor and current mouse as two corners
+    const newVertices = generateShapeVertices(resizeShapeType, resizeAnchorCorner, currentNorm);
+    if (!newVertices || newVertices.length < 3) return;
+
+    // Clamp and update
+    newVertices.forEach(v => {
+        v.x = clampNorm(v.x);
+        v.y = clampNorm(v.y);
+    });
+
+    polygonData.vertices = newVertices;
+    updatePolygonSvgPosition(polygonData);
+
+    // Update resize handle positions
+    hideVertexHandles();
+    showResizeHandles(polygonData);
+}
+
+function handleDocumentMouseUpResize(event) {
+    document.removeEventListener('mousemove', handleDocumentMouseMoveResize);
+    document.removeEventListener('mouseup', handleDocumentMouseUpResize);
+
+    if (resizingCornerIndex !== null && selectedPolygonId) {
+        const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygonData) {
+            polygonData.vertices.forEach(v => {
+                v.x = clampNorm(v.x);
+                v.y = clampNorm(v.y);
+            });
+            updatePolygonSvgPosition(polygonData);
+        }
+
+        commitPendingUndo();
+        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        debouncedAutoSave();
+        console.log("Resize drag completed.");
+
+        resizingCornerIndex = null;
+        resizeOriginalVertices = null;
+        resizeAnchorCorner = null;
+        resizeShapeType = null;
+
+        setInteractionMode('polygon_selected');
+        if (polygonData) showVertexHandles(polygonData);
+    } else {
+        resizingCornerIndex = null;
+        resizeOriginalVertices = null;
+        resizeAnchorCorner = null;
+        resizeShapeType = null;
+        setInteractionMode('polygon_selected');
+    }
+
+    dragJustCompleted = true;
+}
+
+function cancelResizeDrag() {
+    if (resizingCornerIndex === null || !selectedPolygonId || !resizeOriginalVertices) {
+        resizingCornerIndex = null;
+        resizeOriginalVertices = null;
+        resizeAnchorCorner = null;
+        resizeShapeType = null;
+        return;
+    }
+
+    // Revert vertices to original
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (polygonData) {
+        polygonData.vertices = resizeOriginalVertices.map(v => ({ x: v.x, y: v.y }));
+        updatePolygonSvgPosition(polygonData);
+    }
+
+    document.removeEventListener('mousemove', handleDocumentMouseMoveResize);
+    document.removeEventListener('mouseup', handleDocumentMouseUpResize);
+
+    resizingCornerIndex = null;
+    resizeOriginalVertices = null;
+    resizeAnchorCorner = null;
+    resizeShapeType = null;
+    discardPendingUndo();
+
+    setInteractionMode('polygon_selected');
+    if (polygonData) showVertexHandles(polygonData);
+    console.log("Resize drag cancelled.");
+}
+
+// --- Shape Tool Handlers ---
+
+function handleShapeToolSelect(event) {
+    const btn = event.target.closest('.shape-tool-btn');
+    if (!btn) return;
+    const shape = btn.dataset.shape;
+    if (shape === 'free') {
+        setActiveShapeTool(null);
+    } else {
+        setActiveShapeTool(shape);
+    }
+}
+
+function setActiveShapeTool(tool) {
+    currentShapeTool = tool;
+    if (shapeToolsContainer) {
+        shapeToolsContainer.querySelectorAll('.shape-tool-btn').forEach(b => {
+            b.classList.toggle('shape-tool-active',
+                (tool === null && b.dataset.shape === 'free') ||
+                (b.dataset.shape === tool)
+            );
+        });
+    }
+}
+
+function handleDocumentMouseMoveShape(event) {
+    if (currentInteractionMode !== 'drawing_shape' || !shapeAnchorPoint || !shapePreviewElement) return;
+    const svgRect = svgOverlay.getBoundingClientRect();
+    const currentSvgPoint = {
+        x: event.clientX - svgRect.left,
+        y: event.clientY - svgRect.top
+    };
+    const currentNorm = svgToRelativeCoords(currentSvgPoint);
+    if (!currentNorm) return;
+
+    const vertices = generateShapeVertices(currentShapeTool, shapeAnchorPoint, currentNorm);
+    if (!vertices || vertices.length < 3) return;
+
+    const points = vertices.map(p => {
+        const svgP = relativeToSvgCoords(p);
+        return svgP ? `${svgP.x},${svgP.y}` : null;
+    }).filter(p => p !== null).join(' ');
+    shapePreviewElement.setAttribute('points', points);
+}
+
+function handleDocumentMouseUpShape(event) {
+    document.removeEventListener('mousemove', handleDocumentMouseMoveShape);
+    document.removeEventListener('mouseup', handleDocumentMouseUpShape);
+
+    if (currentInteractionMode !== 'drawing_shape' || !shapeAnchorPoint) {
+        cleanupShapePreview();
+        return;
+    }
+
+    const svgRect = svgOverlay.getBoundingClientRect();
+    const endSvgPoint = {
+        x: event.clientX - svgRect.left,
+        y: event.clientY - svgRect.top
+    };
+    const endNorm = svgToRelativeCoords(endSvgPoint);
+    if (!endNorm) {
+        cancelCurrentShape();
+        return;
+    }
+
+    // Check minimum size (avoid accidental micro-shapes)
+    const dxPx = (endNorm.x - shapeAnchorPoint.x) * (gmMapRect?.width || 1);
+    const dyPx = (endNorm.y - shapeAnchorPoint.y) * (gmMapRect?.height || 1);
+    if (Math.sqrt(dxPx * dxPx + dyPx * dyPx) < DRAG_THRESHOLD) {
+        cancelCurrentShape();
+        return;
+    }
+
+    const vertices = generateShapeVertices(currentShapeTool, shapeAnchorPoint, endNorm);
+    if (!vertices || vertices.length < 3) {
+        cancelCurrentShape();
+        return;
+    }
+
+    // Clamp vertices
+    vertices.forEach(v => {
+        v.x = clampNorm(v.x);
+        v.y = clampNorm(v.y);
+    });
+
+    // Create polygon
+    const newPolygon = {
+        id: generateUniqueId(),
+        color: lastFogColor,
+        vertices: vertices,
+        ...(['circle', 'ellipse'].includes(currentShapeTool) && { shapeType: currentShapeTool })
+    };
+    console.log("Shape completed:", newPolygon);
+
+    currentState.fog_of_war = currentState.fog_of_war || { hidden_polygons: [] };
+    pushFogUndoSnapshot();
+    currentState.fog_of_war.hidden_polygons.push(newPolygon);
+    drawSingleCompletedPolygon(newPolygon);
+
+    sendUpdate({ fog_of_war: currentState.fog_of_war });
+    debouncedAutoSave();
+
+    cleanupShapePreview();
+    shapeAnchorPoint = null;
+    setInteractionMode('drawing_enabled');
+}
+
+function cancelCurrentShape() {
+    document.removeEventListener('mousemove', handleDocumentMouseMoveShape);
+    document.removeEventListener('mouseup', handleDocumentMouseUpShape);
+    cleanupShapePreview();
+    shapeAnchorPoint = null;
+    if (isDrawingFogEnabled) {
+        setInteractionMode('drawing_enabled');
+    } else {
+        setInteractionMode('idle');
+    }
+    console.log("Shape drawing cancelled.");
+}
+
+function cleanupShapePreview() {
+    if (shapePreviewElement) {
+        shapePreviewElement.remove();
+        shapePreviewElement = null;
+    }
+}
+
+// --- Shape Vertex Generation ---
+function generateShapeVertices(shapeType, anchor, current) {
+    // anchor and current are normalized {x,y} in [0,1]
+    // For correct aspect ratio, we compute in SVG pixel space then convert back
+    const anchorSvg = relativeToSvgCoords(anchor);
+    const currentSvg = relativeToSvgCoords(current);
+    if (!anchorSvg || !currentSvg) return null;
+
+    let pixelVertices = [];
+
+    switch (shapeType) {
+        case 'circle': {
+            const cx = (anchorSvg.x + currentSvg.x) / 2;
+            const cy = (anchorSvg.y + currentSvg.y) / 2;
+            const dx = Math.abs(currentSvg.x - anchorSvg.x);
+            const dy = Math.abs(currentSvg.y - anchorSvg.y);
+            const r = Math.max(dx, dy) / 2;
+            const N = 48;
+            for (let i = 0; i < N; i++) {
+                const angle = (2 * Math.PI * i) / N;
+                pixelVertices.push({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+            }
+            break;
+        }
+        case 'ellipse': {
+            const cx = (anchorSvg.x + currentSvg.x) / 2;
+            const cy = (anchorSvg.y + currentSvg.y) / 2;
+            const rx = Math.abs(currentSvg.x - anchorSvg.x) / 2;
+            const ry = Math.abs(currentSvg.y - anchorSvg.y) / 2;
+            const N = 48;
+            for (let i = 0; i < N; i++) {
+                const angle = (2 * Math.PI * i) / N;
+                pixelVertices.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) });
+            }
+            break;
+        }
+        case 'square': {
+            const dx = Math.abs(currentSvg.x - anchorSvg.x);
+            const dy = Math.abs(currentSvg.y - anchorSvg.y);
+            const side = Math.max(dx, dy);
+            const signX = currentSvg.x >= anchorSvg.x ? 1 : -1;
+            const signY = currentSvg.y >= anchorSvg.y ? 1 : -1;
+            const x0 = anchorSvg.x;
+            const y0 = anchorSvg.y;
+            const x1 = anchorSvg.x + side * signX;
+            const y1 = anchorSvg.y + side * signY;
+            pixelVertices = [
+                { x: x0, y: y0 },
+                { x: x1, y: y0 },
+                { x: x1, y: y1 },
+                { x: x0, y: y1 }
+            ];
+            break;
+        }
+        case 'rectangle': {
+            const x0 = anchorSvg.x;
+            const y0 = anchorSvg.y;
+            const x1 = currentSvg.x;
+            const y1 = currentSvg.y;
+            pixelVertices = [
+                { x: x0, y: y0 },
+                { x: x1, y: y0 },
+                { x: x1, y: y1 },
+                { x: x0, y: y1 }
+            ];
+            break;
+        }
+        case 'triangle': {
+            // Isoceles triangle: apex at top-center of bounding box, base at bottom
+            const x0 = anchorSvg.x;
+            const y0 = anchorSvg.y;
+            const x1 = currentSvg.x;
+            const y1 = currentSvg.y;
+            const topY = Math.min(y0, y1);
+            const bottomY = Math.max(y0, y1);
+            const leftX = Math.min(x0, x1);
+            const rightX = Math.max(x0, x1);
+            const apexX = (leftX + rightX) / 2;
+            pixelVertices = [
+                { x: apexX, y: topY },
+                { x: rightX, y: bottomY },
+                { x: leftX, y: bottomY }
+            ];
+            break;
+        }
+        default:
+            return null;
+    }
+
+    // Convert pixel vertices back to normalized coords
+    return pixelVertices.map(pv => {
+        const norm = svgToRelativeCoords(pv);
+        return norm ? { x: clampNorm(norm.x), y: clampNorm(norm.y) } : null;
+    }).filter(v => v !== null);
+}
+
+function clampNorm(v) {
+    return Math.max(0, Math.min(1, v));
 }
 
 // Complete Polygon ( *** ADDED sendUpdate *** )
@@ -865,6 +1676,7 @@ function completeCurrentPolygon() {
     currentState.fog_of_war = currentState.fog_of_war || {
         hidden_polygons: []
     };
+    pushFogUndoSnapshot();
     currentState.fog_of_war.hidden_polygons.push(newPolygon);
 
     // Reset drawing state
@@ -897,9 +1709,13 @@ function handlePolygonSelect(event) {
     polygonElement.classList.add('fog-polygon-selected');
     setInteractionMode('polygon_selected');
     showInteractionPopup(event);
+    // Show vertex handles for the selected polygon
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === polygonId);
+    if (polygonData) showVertexHandles(polygonData);
 }
 // Deselect Polygon (Unchanged)
 function deselectPolygon(changeMode = true) {
+    hideVertexHandles();
     if (selectedPolygonId && svgCompletedLayer) {
         const selectedElement = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
         if (selectedElement) selectedElement.classList.remove('fog-polygon-selected');
@@ -934,6 +1750,7 @@ function showInteractionPopup(event) {
 function handleDeletePolygon() {
     if (!selectedPolygonId || !currentState?.fog_of_war?.hidden_polygons) return;
     console.log("Deleting polygon ID:", selectedPolygonId);
+    pushFogUndoSnapshot();
     const initialLength = currentState.fog_of_war.hidden_polygons.length;
     currentState.fog_of_war.hidden_polygons = currentState.fog_of_war.hidden_polygons.filter(p => p.id !== selectedPolygonId);
     if (currentState.fog_of_war.hidden_polygons.length < initialLength) {
@@ -974,6 +1791,7 @@ function handleEyedropperClick(event) {
         console.log(`Eyedropper: (${canvasX},${canvasY}) -> Hex(${newColorHex})`);
         const polygon = currentState.fog_of_war.hidden_polygons.find(p => p.id === selectedPolygonId);
         if (polygon && polygon.color !== newColorHex) {
+            pushFogUndoSnapshot();
             polygon.color = newColorHex;
             lastFogColor = newColorHex;
             updateFogColorDisplay();
@@ -1110,6 +1928,11 @@ function updateMapAndSvgDimensions() {
     }
     console.log("Cached map rect:", gmMapRect);
     drawExistingFogPolygons();
+    // Refresh vertex handles if a polygon is selected
+    if (selectedPolygonId) {
+        const selData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (selData) showVertexHandles(selData);
+    }
 }
 
 function getSvgCoordinates(event) {
@@ -1145,6 +1968,62 @@ function relativeToSvgCoords(relativePoint) {
         x: imageX + imageOffsetX,
         y: imageY + imageOffsetY
     };
+}
+
+// --- Undo/Redo ---
+
+function deepCloneFog(fog) {
+    return {
+        hidden_polygons: (fog?.hidden_polygons || []).map(p => ({
+            ...p,
+            vertices: p.vertices.map(v => ({ x: v.x, y: v.y }))
+        }))
+    };
+}
+
+function pushFogUndoSnapshot() {
+    fogUndoStack.push(deepCloneFog(currentState.fog_of_war));
+    fogRedoStack.length = 0; // new action invalidates redo history
+    if (fogUndoStack.length > FOG_UNDO_MAX) fogUndoStack.shift();
+}
+
+function capturePendingUndo() {
+    pendingUndoSnapshot = deepCloneFog(currentState.fog_of_war);
+}
+
+function commitPendingUndo() {
+    if (pendingUndoSnapshot) {
+        fogUndoStack.push(pendingUndoSnapshot);
+        fogRedoStack.length = 0;
+        if (fogUndoStack.length > FOG_UNDO_MAX) fogUndoStack.shift();
+        pendingUndoSnapshot = null;
+    }
+}
+
+function discardPendingUndo() {
+    pendingUndoSnapshot = null;
+}
+
+function fogUndo() {
+    if (fogUndoStack.length === 0) return;
+    fogRedoStack.push(deepCloneFog(currentState.fog_of_war));
+    currentState.fog_of_war = fogUndoStack.pop();
+    deselectPolygon();
+    drawExistingFogPolygons();
+    sendUpdate({ fog_of_war: currentState.fog_of_war });
+    debouncedAutoSave();
+    console.log("Fog undo applied.");
+}
+
+function fogRedo() {
+    if (fogRedoStack.length === 0) return;
+    fogUndoStack.push(deepCloneFog(currentState.fog_of_war));
+    currentState.fog_of_war = fogRedoStack.pop();
+    deselectPolygon();
+    drawExistingFogPolygons();
+    sendUpdate({ fog_of_war: currentState.fog_of_war });
+    debouncedAutoSave();
+    console.log("Fog redo applied.");
 }
 
 // --- State Updates & Saving (Unchanged) ---
@@ -1227,17 +2106,63 @@ function debouncedAutoSave() {
     }, DEBOUNCE_DELAY);
 }
 
-// --- Session/Player URL Display (Unchanged) ---
-function updatePlayerUrlDisplay() {
-    console.log("Updating player URL display...");
-    const validIdRegex = /^[a-zA-Z0-9_-]{1,50}$/;
-    if (playerUrlDisplay && currentSessionId && validIdRegex.test(currentSessionId)) {
-        const playerPath = `/player?session=${encodeURIComponent(currentSessionId)}`;
-        const fullUrl = window.location.origin + playerPath;
-        playerUrlDisplay.value = fullUrl;
-    } else if (playerUrlDisplay) {
-        playerUrlDisplay.value = "Enter valid Session ID...";
+// --- Session/Player URL Display ---
+function fetchLanInfo() {
+    fetch('/api/lan-info')
+        .then(r => r.json())
+        .then(data => {
+            if (lanPlayerUrlDisplay && data.ip) {
+                const sessionId = currentSessionId || 'my-game';
+                lanPlayerUrlDisplay.value = `http://${data.ip}:${data.port}/player?session=${encodeURIComponent(sessionId)}`;
+            }
+        })
+        .catch(err => {
+            console.warn("Could not fetch LAN info:", err);
+            if (lanPlayerUrlDisplay) lanPlayerUrlDisplay.value = "Could not detect LAN IP";
+        });
+}
+
+function copyLanPlayerUrlToClipboard() {
+    if (!lanPlayerUrlDisplay) return;
+    lanPlayerUrlDisplay.select();
+    lanPlayerUrlDisplay.setSelectionRange(0, 99999);
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(lanPlayerUrlDisplay.value).then(() => {
+            if (lanCopyStatusDisplay) { lanCopyStatusDisplay.textContent = "Copied!"; setTimeout(() => { lanCopyStatusDisplay.textContent = ""; }, 2000); }
+        }).catch(() => {
+            document.execCommand('copy');
+            if (lanCopyStatusDisplay) { lanCopyStatusDisplay.textContent = "Copied!"; setTimeout(() => { lanCopyStatusDisplay.textContent = ""; }, 2000); }
+        });
+    } else {
+        document.execCommand('copy');
+        if (lanCopyStatusDisplay) { lanCopyStatusDisplay.textContent = "Copied!"; setTimeout(() => { lanCopyStatusDisplay.textContent = ""; }, 2000); }
     }
+}
+
+function openQrModal() {
+    if (!qrModal || !qrCodeContainer || !lanPlayerUrlDisplay) return;
+    const url = lanPlayerUrlDisplay.value;
+    if (!url || url.startsWith('Detecting') || url.startsWith('Could not')) return;
+
+    // Clear previous QR code
+    qrCodeContainer.innerHTML = '';
+    if (qrModalUrl) qrModalUrl.textContent = url;
+
+    // Generate QR code (qrcode.js loaded from CDN)
+    new QRCode(qrCodeContainer, {
+        text: url,
+        width: 256,
+        height: 256,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+    });
+
+    qrModal.style.display = 'flex';
+}
+
+function closeQrModal() {
+    if (qrModal) qrModal.style.display = 'none';
 }
 
 // --- Helpers (Unchanged) ---

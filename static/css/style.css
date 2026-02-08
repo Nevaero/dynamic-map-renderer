@@ -229,6 +229,7 @@ header h1 {
 /* Set cursor styles based on mode */
 #gm-svg-overlay.drawing-active { cursor: crosshair; }
 #gm-svg-overlay.eyedropper-active { cursor: copy; }
+#gm-svg-overlay.dragging-active { cursor: grabbing; pointer-events: auto; }
 
 
 /* SVG elements used for drawing (temporary) */
@@ -272,6 +273,81 @@ header h1 {
      stroke: #00ffff; /* Cyan stroke for selected */
      stroke-width: 3 !important; /* Use important to override hover potentially */
      opacity: 0.8 !important; /* Use important to override hover potentially */
+}
+
+/* Vertex editing handles on selected polygons */
+#gm-svg-overlay .fog-vertex-handle {
+    fill: #ffffff;
+    stroke: #007bff;
+    stroke-width: 2;
+    cursor: grab;
+    pointer-events: auto;  /* Must be clickable even when overlay has pointer-events: none */
+}
+#gm-svg-overlay .fog-vertex-handle:hover {
+    fill: #007bff;
+    stroke: #ffffff;
+    r: 7;
+}
+
+/* Resize handles for circle/ellipse shapes */
+#gm-svg-overlay .fog-resize-handle {
+    fill: #ffffff;
+    stroke: #007bff;
+    stroke-width: 2;
+    pointer-events: auto;
+}
+#gm-svg-overlay .fog-resize-handle:hover {
+    fill: #007bff;
+    stroke: #ffffff;
+    r: 8;
+}
+
+/* Shape preview polygon (during click-drag shape drawing) */
+#gm-svg-overlay .fog-shape-preview {
+    fill: none;
+    stroke: #ffff00;
+    stroke-width: 2;
+    stroke-dasharray: 6 3;
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* Grab cursor on completed polygons when drawing is not active (for drag hint) */
+#gm-svg-overlay .fog-polygon-complete {
+    cursor: grab;
+}
+#gm-svg-overlay.drawing-active .fog-polygon-complete {
+    cursor: pointer;
+}
+
+/* Shape tool buttons container */
+.shape-tools-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+    margin-bottom: 4px;
+}
+.shape-tool-btn {
+    flex: 1 1 auto;
+    min-width: 50px;
+    padding: 4px 6px !important;
+    font-size: 0.78em !important;
+    background-color: #555 !important;
+    color: #eee !important;
+    border: 1px solid #777 !important;
+    border-radius: 3px !important;
+    cursor: pointer;
+    text-align: center;
+    transition: background-color 0.15s ease;
+}
+.shape-tool-btn:hover {
+    background-color: #666 !important;
+}
+.shape-tool-btn.shape-tool-active {
+    background-color: #007bff !important;
+    border-color: #0056b3 !important;
+    color: #fff !important;
 }
 
 /* Hidden Canvas for Eyedropper */
@@ -353,19 +429,68 @@ header h1 {
     display: flex;
     align-items: center;
 }
-#copy-player-url {
+#copy-lan-player-url, #show-qr-code {
     padding: 4px 8px;
     font-size: 0.8em;
     margin-left: 5px;
     cursor: pointer;
     vertical-align: middle;
-    flex-shrink: 0; /* Prevent button from shrinking */
-    /* Use default button styles from .gm-controls */
+    flex-shrink: 0;
 }
-#copy-status {
+#show-qr-code {
+    font-weight: bold;
+}
+#lan-copy-status {
     font-size: 0.8em;
     margin-top: 3px;
     min-height: 1em;
-    color: green; /* Default color */
+    color: green;
+}
+
+/* --- QR Code Modal --- */
+.qr-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.qr-modal-content {
+    background: #1e1e1e;
+    color: #eee;
+    border-radius: 10px;
+    padding: 30px;
+    text-align: center;
+    position: relative;
+    max-width: 360px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.qr-modal-content h3 {
+    margin: 0 0 18px 0;
+    font-size: 1.1em;
+}
+.qr-modal-close {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 1.5em;
+    cursor: pointer;
+    line-height: 1;
+}
+.qr-modal-close:hover { color: #fff; }
+#qr-code-container {
+    display: inline-block;
+    padding: 12px;
+    background: #fff;
+    border-radius: 6px;
+}
+#qr-code-container canvas, #qr-code-container img {
+    display: block;
 }
 
