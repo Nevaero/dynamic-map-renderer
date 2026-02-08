@@ -818,9 +818,8 @@ function handleToggleFogDrawing() {
             deselectPolygon();
         }
         setInteractionMode('drawing_enabled');
-        // Show shape tools, reset to freehand
+        // Show shape tools (preserve selected shape)
         if (shapeToolsContainer) shapeToolsContainer.style.display = 'flex';
-        setActiveShapeTool(null);
     } else {
         if (currentInteractionMode === 'drawing_polygon') {
             cancelCurrentPolygon();
@@ -829,9 +828,8 @@ function handleToggleFogDrawing() {
             cancelCurrentShape();
         }
         setInteractionMode('idle');
-        // Hide shape tools
+        // Hide shape tools (preserve selected shape)
         if (shapeToolsContainer) shapeToolsContainer.style.display = 'none';
-        currentShapeTool = null;
     }
 }
 // Interaction Mode Setter (Unchanged)
