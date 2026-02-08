@@ -9,7 +9,13 @@
       "Bash(taskkill:*)",
       "Bash(del \"C:\\\\Users\\\\RomainPIEBOURG\\\\Documents\\\\dev\\\\dynamic-map-renderer\\\\dist\\\\DynamicMapRenderer.exe\")",
       "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Add circle/ellipse resize handles and fog undo/redo \\(Ctrl+Z/Y\\)\n\nCircles/ellipses now show 4 corner resize handles instead of 48 vertex\nhandles. Dragging a corner regenerates the shape in real-time. Added full\nundo/redo stack \\(max 50\\) for all fog mutations: draw, delete, move,\nvertex edit, resize, and color change.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Add circle/ellipse resize handles and fog undo/redo \\(Ctrl+Z/Y\\)\n\nCircles/ellipses now show 4 corner resize handles instead of 48 vertex\nhandles. Dragging a corner regenerates the shape in real-time. Added full\nundo/redo stack \\(max 50\\) for all fog mutations: draw, delete, move,\nvertex edit, resize, and color change.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(gh auth status:*)",
+      "Bash(where:*)",
+      "Bash(git remote rename:*)",
+      "Bash(git remote add:*)",
+      "Bash(git remote remove:*)",
+      "Bash(git push:*)"
     ]
   }
 }
