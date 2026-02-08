@@ -107,6 +107,7 @@ const toggleFogDrawingButton = document.getElementById('toggle-fog-drawing-butto
 const fogColorPresets = document.getElementById('fog-color-presets');
 const fogInteractionPopup = document.getElementById('fog-interaction-popup');
 const fogDeleteButton = document.getElementById('fog-delete-button');
+const fogPopupColorPresets = document.getElementById('fog-popup-color-presets');
 svgOverlay = document.getElementById('gm-svg-overlay');
 const shapeToolsContainer = document.getElementById('shape-tools-container');
 const mapViewPanel = document.querySelector('.map-view-panel');
@@ -2036,25 +2037,28 @@ function handleDeletePolygon() {
     }
     deselectPolygon();
 }
-// --- Fog Color Picker (swatch + input type="color" on popup) ---
-function setupFogColorSwatches() {
-    TokenShared.setupColorSwatches(fogColorPresets, (color) => {
-        lastFogColor = color;
-        // Also recolor the selected polygon if one is active
-        if (selectedPolygonId) {
-            const polygon = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
-            if (polygon && polygon.color !== color) {
-                pushFogUndoSnapshot();
-                polygon.color = color;
-                if (svgCompletedLayer) {
-                    const el = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
-                    if (el) el.setAttribute('fill', color);
-                }
-                sendUpdate({ fog_of_war: currentState.fog_of_war });
-                debouncedAutoSave();
+// --- Fog Color Swatches ---
+function applyFogColor(color) {
+    lastFogColor = color;
+    if (selectedPolygonId) {
+        const polygon = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygon && polygon.color !== color) {
+            pushFogUndoSnapshot();
+            polygon.color = color;
+            if (svgCompletedLayer) {
+                const el = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
+                if (el) el.setAttribute('fill', color);
             }
+            sendUpdate({ fog_of_war: currentState.fog_of_war });
+            debouncedAutoSave();
         }
-    });
+    }
+}
+function setupFogColorSwatches() {
+    // Sidebar swatches
+    TokenShared.setupColorSwatches(fogColorPresets, applyFogColor);
+    // Popup swatches (contextual menu)
+    TokenShared.setupColorSwatches(fogPopupColorPresets, applyFogColor);
 }
 
 // --- SVG Drawing Functions (Unchanged) ---
