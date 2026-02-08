@@ -107,7 +107,8 @@ const toggleFogDrawingButton = document.getElementById('toggle-fog-drawing-butto
 const fogColorPresets = document.getElementById('fog-color-presets');
 const fogInteractionPopup = document.getElementById('fog-interaction-popup');
 const fogDeleteButton = document.getElementById('fog-delete-button');
-const fogPopupColorPresets = document.getElementById('fog-popup-color-presets');
+const fogColorButton = document.getElementById('fog-color-button');
+const fogColorInput = document.getElementById('fog-color-input');
 svgOverlay = document.getElementById('gm-svg-overlay');
 const shapeToolsContainer = document.getElementById('shape-tools-container');
 const mapViewPanel = document.querySelector('.map-view-panel');
@@ -640,6 +641,7 @@ function setupEventListeners() {
     document.addEventListener('keydown', handleKeyDown);
     if (fogDeleteButton) fogDeleteButton.addEventListener('click', handleDeletePolygon);
     else console.error("fogDeleteButton missing!");
+    setupFogColorPicker();
     setupFogColorSwatches();
     window.addEventListener('resize', updateMapAndSvgDimensions);
     // Token event listeners
@@ -2037,28 +2039,39 @@ function handleDeletePolygon() {
     }
     deselectPolygon();
 }
-// --- Fog Color Swatches ---
-function applyFogColor(color) {
-    lastFogColor = color;
-    if (selectedPolygonId) {
+// --- Fog Color Picker & Swatches ---
+function setupFogColorSwatches() {
+    TokenShared.setupColorSwatches(fogColorPresets, (color) => {
+        lastFogColor = color;
+    });
+}
+function setupFogColorPicker() {
+    if (!fogColorButton || !fogColorInput) return;
+    fogColorButton.addEventListener('click', () => {
+        if (!selectedPolygonId) return;
         const polygon = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
-        if (polygon && polygon.color !== color) {
+        if (polygon) fogColorInput.value = polygon.color || '#000000';
+        fogColorInput.click();
+    });
+    fogColorInput.addEventListener('input', () => {
+        if (!selectedPolygonId) return;
+        const newColor = fogColorInput.value;
+        const polygon = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygon && polygon.color !== newColor) {
             pushFogUndoSnapshot();
-            polygon.color = color;
+            polygon.color = newColor;
+            lastFogColor = newColor;
             if (svgCompletedLayer) {
                 const el = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
-                if (el) el.setAttribute('fill', color);
+                if (el) el.setAttribute('fill', newColor);
             }
             sendUpdate({ fog_of_war: currentState.fog_of_war });
             debouncedAutoSave();
         }
-    }
-}
-function setupFogColorSwatches() {
-    // Sidebar swatches
-    TokenShared.setupColorSwatches(fogColorPresets, applyFogColor);
-    // Popup swatches (contextual menu)
-    TokenShared.setupColorSwatches(fogPopupColorPresets, applyFogColor);
+    });
+    fogColorInput.addEventListener('change', () => {
+        deselectPolygon();
+    });
 }
 
 // --- SVG Drawing Functions (Unchanged) ---
