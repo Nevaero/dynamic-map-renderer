@@ -2040,6 +2040,20 @@ function handleDeletePolygon() {
 function setupFogColorSwatches() {
     TokenShared.setupColorSwatches(fogColorPresets, (color) => {
         lastFogColor = color;
+        // Also recolor the selected polygon if one is active
+        if (selectedPolygonId) {
+            const polygon = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+            if (polygon && polygon.color !== color) {
+                pushFogUndoSnapshot();
+                polygon.color = color;
+                if (svgCompletedLayer) {
+                    const el = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
+                    if (el) el.setAttribute('fill', color);
+                }
+                sendUpdate({ fog_of_war: currentState.fog_of_war });
+                debouncedAutoSave();
+            }
+        }
     });
 }
 
