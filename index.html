@@ -6,6 +6,7 @@
     <title>Dynamic Map - GM View</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.2/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     </head>
 <body>
     <header>
@@ -32,11 +33,20 @@
 
              <div class="gm-controls fog-controls">
                 <fieldset> <legend>Masking / Fog of War</legend>
-                    <button id="toggle-fog-drawing-button" disabled>Draw New Polygons</button> <div style="margin-top: 5px;">
+                    <button id="toggle-fog-drawing-button" disabled>Draw New Polygons</button>
+                    <div id="shape-tools-container" class="shape-tools-container" style="display: none;">
+                        <button class="shape-tool-btn shape-tool-active" data-shape="free">Free</button>
+                        <button class="shape-tool-btn" data-shape="circle">Circle</button>
+                        <button class="shape-tool-btn" data-shape="ellipse">Ellipse</button>
+                        <button class="shape-tool-btn" data-shape="square">Square</button>
+                        <button class="shape-tool-btn" data-shape="rectangle">Rect</button>
+                        <button class="shape-tool-btn" data-shape="triangle">Triangle</button>
+                    </div>
+                    <div style="margin-top: 5px;">
                         <label for="fog-color-display">Current Color:</label>
                         <span id="fog-color-display" title="Last used polygon color"></span>
                     </div>
-                    <p style="font-size: 0.8em; margin-top: 5px; color: #555;">Click map to draw, click near start to close. Click polygon to delete/recolour. Colour is selected from image.</p>
+                    <p style="font-size: 0.8em; margin-top: 5px; color: #555;">Click map to draw, click near start to close. Drag polygons to move them. Click polygon to delete/recolour. Colour is selected from image.</p>
                 </fieldset>
             </div>
 
@@ -63,12 +73,13 @@
             </div>
 
             <div class="session-info">
-                 <label for="player-url-display"><strong>Player URL (Session: my-game):</strong></label>
+                 <label for="lan-player-url-display"><strong>Player URL (share with players on your network):</strong></label>
                 <div style="display: flex; align-items: center;">
-                     <input type="text" id="player-url-display" readonly value="Loading..." title="Share this URL with players">
-                     <button id="copy-player-url" title="Copy URL to clipboard">Copy</button>
+                     <input type="text" id="lan-player-url-display" readonly value="Detecting LAN IP..." title="Share this URL with players on your local network">
+                     <button id="copy-lan-player-url" title="Copy LAN URL to clipboard">Copy</button>
+                     <button id="show-qr-code" title="Show QR code">QR</button>
                 </div>
-                <p id="copy-status" style="font-size: 0.8em; margin-top: 3px; min-height: 1em;"></p>
+                <p id="lan-copy-status" style="font-size: 0.8em; margin-top: 3px; min-height: 1em;"></p>
             </div>
         </aside>
 
@@ -86,6 +97,15 @@
     </div>
 
     <canvas id="eyedropper-canvas"></canvas>
+
+    <div id="qr-modal" class="qr-modal-overlay" style="display:none;">
+        <div class="qr-modal-content">
+            <button id="qr-modal-close" class="qr-modal-close">&times;</button>
+            <h3>Scan to join as Player</h3>
+            <div id="qr-code-container"></div>
+            <p id="qr-modal-url" style="font-size:0.85em; word-break:break-all; margin-top:10px; color:#ccc;"></p>
+        </div>
+    </div>
 
     <script src="{{ url_for('static', filename='js/gm.js') }}"></script>
 </body>

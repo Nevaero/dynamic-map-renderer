@@ -3,12 +3,18 @@
 # Main Flask application file for the Dynamic Map Renderer
 
 import os
+import sys
 import json
 import copy
 import traceback
 import re
 import time
 import logging
+import webbrowser
+import threading
+import socket
+import base64
+from io import BytesIO
 from uuid import uuid4
 from PIL import Image, ImageDraw, UnidentifiedImageError
 
@@ -17,11 +23,30 @@ from flask_socketio import SocketIO, emit as socketio_emit, join_room, leave_roo
 from werkzeug.utils import secure_filename
 
 # --- Configuration ---
-APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+# When packaged with PyInstaller, bundled read-only assets live in sys._MEIPASS,
+# while writable user data (maps, configs, generated_maps) lives next to the .exe.
+if getattr(sys, 'frozen', False):
+    # Running as a PyInstaller bundle
+    BUNDLE_DIR = sys._MEIPASS                              # read-only bundled assets
+    APP_ROOT = os.path.dirname(sys.executable)             # writable dir next to .exe
+else:
+    BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+    APP_ROOT = BUNDLE_DIR
+
 MAPS_FOLDER = os.path.join(APP_ROOT, 'maps')
 CONFIGS_FOLDER = os.path.join(APP_ROOT, 'configs')
 FILTERS_FOLDER = os.path.join(APP_ROOT, 'filters')
 GENERATED_MAPS_FOLDER = os.path.join(APP_ROOT, 'generated_maps')
+
+# On first run of the packaged .exe, copy bundled seed data next to the executable
+# so the user has working filters and sample maps out of the box.
+if getattr(sys, 'frozen', False):
+    import shutil
+    for _folder_name in ('filters', 'maps', 'configs'):
+        _src = os.path.join(BUNDLE_DIR, _folder_name)
+        _dst = os.path.join(APP_ROOT, _folder_name)
+        if os.path.isdir(_src) and not os.path.isdir(_dst):
+            shutil.copytree(_src, _dst)
 ALLOWED_MAP_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 SESSION_ID_REGEX = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
 DEFAULT_HELP_MAP_FILENAME = "Help.png" # Define default map filename
@@ -54,7 +79,9 @@ def cleanup_generated_maps():
 available_filters = {}
 
 # Initialize Flask App & Config
-app = Flask(__name__, static_folder='static', template_folder='templates')
+app = Flask(__name__,
+            static_folder=os.path.join(BUNDLE_DIR, 'static'),
+            template_folder=os.path.join(BUNDLE_DIR, 'templates'))
 app.config['SECRET_KEY'] = os.urandom(24)
 app.config['MAPS_FOLDER'] = MAPS_FOLDER
 app.config['CONFIGS_FOLDER'] = CONFIGS_FOLDER
@@ -92,6 +119,22 @@ load_available_filters()
 
 # Initialize SocketIO AFTER app instance is created
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# --- LAN IP Detection ---
+def get_lan_ip():
+    """Return the machine's LAN IP address (best-effort)."""
+    try:
+        # Connect to an external address (no data is sent) to find the preferred outbound IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+LAN_IP = get_lan_ip()
 
 # --- In-Memory State Storage ---
 session_states = {}
@@ -290,6 +333,59 @@ def generate_player_map(session_id, state):
     except Exception as e: logging.error(f"Error generating player map: {e}", exc_info=True)
     return None
 
+def generate_player_map_bytes(state):
+    """Generate composited map as JPEG bytes in memory (no disk I/O)."""
+    original_map_path = state.get('original_map_path')
+    fog_data = state.get('fog_of_war', {}).get('hidden_polygons', [])
+    if not original_map_path:
+        logging.debug("generate_player_map_bytes: No original_map_path.")
+        return None
+    full_map_path = os.path.join(APP_ROOT, original_map_path)
+    if not os.path.exists(full_map_path):
+        logging.error(f"generate_player_map_bytes: Original map missing: {full_map_path}")
+        return None
+    try:
+        with Image.open(full_map_path).convert('RGB') as base_image:
+            draw = ImageDraw.Draw(base_image)
+            for polygon in fog_data:
+                vertices = polygon.get('vertices')
+                if not vertices or not isinstance(vertices, list) or len(vertices) < 3:
+                    continue
+                size_x, size_y = base_image.size
+                absolute_vertices = []
+                valid_polygon = True
+                for vertex in vertices:
+                    if isinstance(vertex, dict) and 'x' in vertex and 'y' in vertex:
+                        try:
+                            x_coord = max(0, min(int(float(vertex['x']) * size_x), size_x - 1))
+                            y_coord = max(0, min(int(float(vertex['y']) * size_y), size_y - 1))
+                            absolute_vertices.append((x_coord, y_coord))
+                        except (ValueError, TypeError):
+                            valid_polygon = False
+                            break
+                    else:
+                        valid_polygon = False
+                        break
+                if not valid_polygon or len(absolute_vertices) < 3:
+                    continue
+                color = polygon.get('color', '#000000')
+                try:
+                    if not re.match(r'^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$', color):
+                        color = '#000000'
+                    draw.polygon(absolute_vertices, fill=color)
+                except Exception as e:
+                    logging.error(f"generate_player_map_bytes: Error drawing polygon: {e}")
+            buf = BytesIO()
+            base_image.save(buf, format='JPEG', quality=85)
+            image_bytes = buf.getvalue()
+            logging.info(f"generate_player_map_bytes: Generated {len(image_bytes)} bytes JPEG in memory.")
+            return image_bytes
+    except UnidentifiedImageError:
+        logging.error(f"generate_player_map_bytes: Pillow could not identify: {full_map_path}")
+    except Exception as e:
+        logging.error(f"Error generating player map bytes: {e}", exc_info=True)
+    return None
+
 # --- HTTP Routes (Unchanged, condensed) ---
 @app.route('/')
 def index(): return render_template('index.html')
@@ -350,6 +446,9 @@ def get_filters():
         if 'params' in safe_config: params_copy = copy.deepcopy(safe_config['params']); [params_copy.pop(key, None) for key in text_params]; safe_config['params'] = params_copy
         client_safe_filters[f_id] = safe_config
     return jsonify(client_safe_filters)
+@app.route('/api/lan-info', methods=['GET'])
+def get_lan_info():
+    return jsonify({"ip": LAN_IP, "port": 5000, "player_url": f"http://{LAN_IP}:5000/player?session=my-game"})
 @app.route('/api/maps', methods=['GET'])
 def list_map_content():
     try:
@@ -414,13 +513,19 @@ def handle_join_session(data):
     if session_id not in session_states:
         logging.info(f"Creating default state for session: {session_id}")
         session_states[session_id] = get_default_session_state() # This might now load Help.png state
-    current_session_state = session_states.get(session_id); player_map_url = None
+    current_session_state = session_states.get(session_id)
+    # Generate image bytes in memory
+    image_bytes = None
     if current_session_state.get('original_map_path'):
-        player_map_url = generate_player_map(session_id, current_session_state)
-    state_to_send = copy.deepcopy(current_session_state); state_to_send['map_content_path'] = player_map_url
+        image_bytes = generate_player_map_bytes(current_session_state)
+    state_to_send = copy.deepcopy(current_session_state)
+    state_to_send['map_content_path'] = 'binary://' if image_bytes else None
     state_to_send.pop('original_map_path', None)
-    logging.info(f"Sending initial state to {request.sid}. Player map URL: {player_map_url}")
+    logging.info(f"Sending initial state to {request.sid}. Binary image: {len(image_bytes) if image_bytes else 0} bytes")
     socketio_emit('state_update', state_to_send, to=request.sid)
+    if image_bytes:
+        b64_data = base64.b64encode(image_bytes).decode('ascii')
+        socketio_emit('map_image_data', {'b64': b64_data}, to=request.sid)
 
 @socketio.on('gm_update')
 def handle_gm_update(data):
@@ -454,35 +559,42 @@ def handle_gm_update(data):
         else: updated_state['original_map_path'] = original_map_path_before_update # Preserve original path
         updated_state['display_type'] = 'image' # Ensure type
 
-        player_map_url = None; regenerate_image = map_changed or fog_changed # Regenerate if map OR fog changed
+        image_bytes = None
+        regenerate_image = map_changed or fog_changed
         if regenerate_image and updated_state.get('original_map_path'):
-            logging.info(f"Regenerating map image for session {session_id} because map_changed={map_changed} or fog_changed={fog_changed}")
-            player_map_url = generate_player_map(session_id, updated_state)
-        elif updated_state.get('original_map_path'): # Reuse existing map URL
-            player_map_url = current_authoritative_state.get('map_content_path')
-            logging.debug(f"Reusing existing map image URL for session {session_id}: {player_map_url}")
-            if player_map_url: # Check if reused file exists
-                 filename_only = os.path.basename(player_map_url); filepath = os.path.join(app.config['GENERATED_MAPS_FOLDER'], secure_filename(filename_only))
-                 if not os.path.exists(filepath):
-                      logging.warning(f"Reused map URL file missing ({filepath}), forcing regeneration."); player_map_url = generate_player_map(session_id, updated_state)
-            else: player_map_url = generate_player_map(session_id, updated_state) # Generate if no previous URL
+            logging.info(f"Regenerating map image for session {session_id} (in memory) because map_changed={map_changed} or fog_changed={fog_changed}")
+            image_bytes = generate_player_map_bytes(updated_state)
 
-        updated_state['map_content_path'] = player_map_url # Update authoritative state with URL for next time
+        updated_state['map_content_path'] = 'binary://' if image_bytes else current_authoritative_state.get('map_content_path')
         session_states[session_id] = updated_state
         logging.debug(f"Session {session_id}: Authoritative state updated.")
 
-        state_to_send = copy.deepcopy(updated_state); state_to_send['map_content_path'] = player_map_url # Prepare state to send NOW
+        state_to_send = copy.deepcopy(updated_state)
         state_to_send.pop('original_map_path', None)
-        if player_map_url: logging.info(f"Broadcasting update session {session_id} with map URL: {player_map_url}")
-        else: logging.warning(f"Broadcasting update session {session_id} with null map path.")
-        socketio_emit('state_update', state_to_send, room=session_id); logging.debug(f"Session {session_id}: Broadcasted state_update.")
+        if image_bytes:
+            state_to_send['map_content_path'] = 'binary://'
+            logging.info(f"Broadcasting update session {session_id} with {len(image_bytes)} bytes binary image.")
+        elif not regenerate_image:
+            # No image change — keep map_content_path as-is so player doesn't refetch
+            state_to_send['map_content_path'] = current_authoritative_state.get('map_content_path')
+            logging.debug(f"Broadcasting metadata-only update session {session_id}.")
+        else:
+            logging.warning(f"Broadcasting update session {session_id} with null map path (image generation failed).")
+            state_to_send['map_content_path'] = None
+        socketio_emit('state_update', state_to_send, room=session_id)
+        if image_bytes:
+            b64_data = base64.b64encode(image_bytes).decode('ascii')
+            socketio_emit('map_image_data', {'b64': b64_data}, room=session_id)
+        logging.debug(f"Session {session_id}: Broadcasted state_update.")
     except Exception as e: logging.error(f"Error processing GM update session {session_id}: {e}", exc_info=True)
 
 
 # --- Main Execution ---
 if __name__ == '__main__':
     cleanup_generated_maps() # Clear old maps on start
-    with app.app_context(): print("--- Registered URL Routes ---\n", app.url_map, "\n-----------------------------")
+    is_frozen = getattr(sys, 'frozen', False)
+    if not is_frozen:
+        with app.app_context(): print("--- Registered URL Routes ---\n", app.url_map, "\n-----------------------------")
     print("------------------------------------------")
     print(" Starting Dynamic Map Renderer server... ")
     print(" Backend version: 2.7.15 (Fog of War - Stage C: Default Help Map State) ") # Version updated
@@ -491,8 +603,20 @@ if __name__ == '__main__':
     print(f" Loading filters from:    {app.config['FILTERS_FOLDER']}")
     print(f" Saving generated images to:    {app.config['GENERATED_MAPS_FOLDER']}")
     print("------------------------------------------")
-    print(" Access GM View: http://127.0.0.1:5000/ ")
-    print(" Access Player View Example: http://127.0.0.1:5000/player?session=my-game ")
+    print(f" Your LAN IP: {LAN_IP}")
     print("------------------------------------------")
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+    print(f" GM View (this machine): http://127.0.0.1:5000/")
+    print(f" Player View (LAN):      http://{LAN_IP}:5000/player?session=my-game")
+    print("------------------------------------------")
+    if is_frozen:
+        print(" (Close this window to stop the server)")
+        print("------------------------------------------")
+
+    # Auto-open browser after a short delay to let the server start
+    def open_browser():
+        time.sleep(1.5)
+        webbrowser.open("http://127.0.0.1:5000/")
+    threading.Thread(target=open_browser, daemon=True).start()
+
+    socketio.run(app, debug=not is_frozen, host='0.0.0.0', port=5000, use_reloader=False)
 

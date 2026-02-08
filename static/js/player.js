@@ -20,6 +20,18 @@ let currentFilterParams = {};
 let currentMapContentPath = null;
 let currentObjectUrl = null; // Keep track of the blob URL
 
+// --- Player Local Pan/Zoom State ---
+let playerZoom = 1.0;       // multiplier on top of GM scale
+let playerPanX = 0.0;       // offset in world units
+let playerPanY = 0.0;       // offset in world units
+let touchState = {
+    pointers: new Map(),     // pointerId -> {x, y}
+    lastPinchDist: null,
+    lastPinchCenter: null,
+    lastSingleTouch: null,
+    isPinching: false
+};
+
 // --- DOM Elements ---
 const canvas = document.getElementById('player-canvas');
 const statusDiv = document.getElementById('status');
@@ -77,6 +89,7 @@ async function init() {
     console.log("Geometry and Mesh setup complete.");
     // Event Listeners and Connection...
     window.addEventListener('resize', onWindowResize, false);
+    setupPlayerTouchControls();
     connectWebSocket();
     animate();
     console.log("Initialization sequence complete.");
@@ -129,6 +142,7 @@ function connectWebSocket() {
     socket.on('disconnect', (reason) => { console.warn(`WebSocket disconnected: ${reason}`); displayStatus(`Disconnected.`); });
     socket.on('connect_error', (error) => { console.error('WebSocket connection error:', error); displayStatus(`Connection Error.`); });
     socket.on('state_update', handleStateUpdate);
+    socket.on('map_image_data', handleMapImageData);
     socket.on('error', (data) => { console.error('Server WS Error:', data.message || data); displayStatus(`SERVER ERROR.`); });
     console.log("WebSocket event handlers set up.");
 }
@@ -165,12 +179,12 @@ async function handleStateUpdate(state) {
         else { cleanupUniforms(material, null); }
         if (shaderChanged) { material.needsUpdate = true; console.log("Shader material marked for update.");}
 
-        // 3. Update Texture if path changed
+        // 3. Update Texture if path changed (skip if binary:// — handled by map_image_data event)
         const pathChanged = newContentPath !== currentMapContentPath;
-        if (pathChanged) {
+        if (pathChanged && newContentPath && !newContentPath.startsWith('binary://')) {
             console.log(`Content path change: ${currentMapContentPath} -> ${newContentPath}`);
             // Clear cache for the OLD path before loading new one (using full URL)
-            if (currentMapContentPath && typeof THREE !== 'undefined' && THREE.Cache?.enabled) {
+            if (currentMapContentPath && !currentMapContentPath.startsWith('binary://') && typeof THREE !== 'undefined' && THREE.Cache?.enabled) {
                 try {
                     const oldFullUrl = new URL(currentMapContentPath, window.location.origin).href;
                     console.log(`[Cache] Removing old texture URL from THREE.Cache: ${oldFullUrl}`);
@@ -178,8 +192,11 @@ async function handleStateUpdate(state) {
                 } catch(e) { console.warn("Could not construct URL for cache removal:", currentMapContentPath); }
             }
             // Use fetch + ImageLoader strategy
-            await updateTextureViaFetchAndImageLoader(newContentPath, material, 'foreground'); // Use new function
+            await updateTextureViaFetchAndImageLoader(newContentPath, material, 'foreground');
             currentMapContentPath = newContentPath; // Update current path tracking
+        } else if (newContentPath && newContentPath.startsWith('binary://')) {
+            // Binary image will arrive via map_image_data event — just track the sentinel
+            currentMapContentPath = newContentPath;
         } else {
              planeMesh.visible = material.uniforms.mapTexture.value !== null;
         }
@@ -189,6 +206,50 @@ async function handleStateUpdate(state) {
     } catch (error) {
         console.error("[handleStateUpdate] Error applying state:", error);
         displayStatus(`ERROR applying state.`);
+    }
+}
+
+// --- Binary Image Data Handler ---
+function handleMapImageData(data) {
+    const b64 = data && data.b64;
+    if (!b64) { console.warn("[map_image_data] No b64 field in data."); return; }
+    console.log(`[map_image_data] Received base64 image: ${b64.length} chars`);
+    if (!material || !planeMesh) { console.warn("[map_image_data] Material/mesh not ready."); return; }
+
+    // Revoke previous object URL
+    if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
+    // Dispose previous texture
+    if (material.uniforms.mapTexture?.value) { material.uniforms.mapTexture.value.dispose(); material.uniforms.mapTexture.value = null; }
+
+    try {
+        // Decode base64 to binary
+        const binaryStr = atob(b64);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) { bytes[i] = binaryStr.charCodeAt(i); }
+        const blob = new Blob([bytes], { type: 'image/jpeg' });
+        currentObjectUrl = URL.createObjectURL(blob);
+
+        imageLoader.load(currentObjectUrl,
+            (imageElement) => {
+                try {
+                    const texture = new THREE.Texture(imageElement);
+                    texture.needsUpdate = true;
+                    material.uniforms.mapTexture.value = texture;
+                    if (imageElement.naturalWidth > 0 && imageElement.naturalHeight > 0) {
+                        const textureAspect = imageElement.naturalWidth / imageElement.naturalHeight;
+                        planeMesh.scale.set(textureAspect, 1.0, 1.0);
+                        planeMesh.visible = true;
+                    }
+                    updateCameraView(currentViewState);
+                    displayStatus("");
+                    console.log("[map_image_data] Texture loaded from base64 stream.");
+                } catch (e) { console.error("[map_image_data] Error creating texture:", e); }
+            },
+            undefined,
+            (err) => { console.error("[map_image_data] ImageLoader failed:", err); displayStatus("ERROR loading map image."); }
+        );
+    } catch (e) {
+        console.error("[map_image_data] Error processing data:", e);
     }
 }
 
@@ -291,10 +352,13 @@ async function updateTextureViaFetchAndImageLoader(newTexturePath, targetMateria
 function updateCameraView(viewState) {
     if (!viewState || typeof viewState.scale !== 'number' || typeof viewState.center_x !== 'number' || typeof viewState.center_y !== 'number') { viewState = { scale: 1.0, center_x: 0.5, center_y: 0.5 }; }
     if (!planeMesh || !camera) { console.error("updateCameraView: planeMesh or camera missing."); return; }
-    const planeWidth = planeMesh.scale.x; const planeHeight = planeMesh.scale.y; const effectiveScale = Math.max(0.01, viewState.scale);
+    const planeWidth = planeMesh.scale.x; const planeHeight = planeMesh.scale.y;
+    // Combine GM scale with player local zoom
+    const effectiveScale = Math.max(0.01, viewState.scale * playerZoom);
     const viewHeight = planeHeight / effectiveScale; const viewWidth = viewHeight * (window.innerWidth / window.innerHeight);
     camera.left = -viewWidth / 2; camera.right = viewWidth / 2; camera.top = viewHeight / 2; camera.bottom = -viewHeight / 2;
-    const offsetX = (viewState.center_x - 0.5) * planeWidth; const offsetY = -(viewState.center_y - 0.5) * planeHeight;
+    const offsetX = (viewState.center_x - 0.5) * planeWidth + playerPanX;
+    const offsetY = -(viewState.center_y - 0.5) * planeHeight + playerPanY;
     camera.position.x = offsetX; camera.position.y = offsetY; camera.updateProjectionMatrix();
  }
 
@@ -347,6 +411,130 @@ function getBasicFragmentShader() {
 }
 // *** END ENSURE ***
 
+
+// --- Player Touch/Wheel Pan & Zoom ---
+
+function setupPlayerTouchControls() {
+    if (!canvas) return;
+    // Prevent default touch behavior (browser zoom/scroll)
+    canvas.style.touchAction = 'none';
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+
+    // Double-tap to reset
+    let lastTapTime = 0;
+    canvas.addEventListener('pointerdown', (e) => {
+        if (touchState.pointers.size > 0) return; // only for first finger
+        const now = Date.now();
+        if (now - lastTapTime < 300) {
+            // Double-tap: reset local zoom/pan
+            playerZoom = 1.0;
+            playerPanX = 0.0;
+            playerPanY = 0.0;
+            updateCameraView(currentViewState);
+        }
+        lastTapTime = now;
+    });
+
+    console.log("Player touch/wheel controls set up.");
+}
+
+function onPointerDown(e) {
+    touchState.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touchState.pointers.size === 2) {
+        touchState.isPinching = true;
+        const pts = Array.from(touchState.pointers.values());
+        touchState.lastPinchDist = pinchDistance(pts[0], pts[1]);
+        touchState.lastPinchCenter = pinchCenter(pts[0], pts[1]);
+        touchState.lastSingleTouch = null;
+    } else if (touchState.pointers.size === 1) {
+        touchState.lastSingleTouch = { x: e.clientX, y: e.clientY };
+        touchState.isPinching = false;
+    }
+}
+
+function onPointerMove(e) {
+    if (!touchState.pointers.has(e.pointerId)) return;
+    touchState.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (touchState.pointers.size === 2 && touchState.isPinching) {
+        const pts = Array.from(touchState.pointers.values());
+        const dist = pinchDistance(pts[0], pts[1]);
+        const center = pinchCenter(pts[0], pts[1]);
+
+        // Zoom
+        if (touchState.lastPinchDist && touchState.lastPinchDist > 0) {
+            const zoomFactor = dist / touchState.lastPinchDist;
+            playerZoom = Math.max(0.1, Math.min(20, playerZoom * zoomFactor));
+        }
+
+        // Pan (move center)
+        if (touchState.lastPinchCenter) {
+            const dx = center.x - touchState.lastPinchCenter.x;
+            const dy = center.y - touchState.lastPinchCenter.y;
+            applyScreenPan(dx, dy);
+        }
+
+        touchState.lastPinchDist = dist;
+        touchState.lastPinchCenter = center;
+        updateCameraView(currentViewState);
+    } else if (touchState.pointers.size === 1 && !touchState.isPinching && touchState.lastSingleTouch) {
+        // Single-finger pan
+        const dx = e.clientX - touchState.lastSingleTouch.x;
+        const dy = e.clientY - touchState.lastSingleTouch.y;
+        applyScreenPan(dx, dy);
+        touchState.lastSingleTouch = { x: e.clientX, y: e.clientY };
+        updateCameraView(currentViewState);
+    }
+}
+
+function onPointerUp(e) {
+    touchState.pointers.delete(e.pointerId);
+    if (touchState.pointers.size < 2) {
+        touchState.isPinching = false;
+        touchState.lastPinchDist = null;
+        touchState.lastPinchCenter = null;
+    }
+    if (touchState.pointers.size === 1) {
+        // Transition from pinch to single-finger pan
+        const remaining = Array.from(touchState.pointers.values())[0];
+        touchState.lastSingleTouch = { x: remaining.x, y: remaining.y };
+    } else if (touchState.pointers.size === 0) {
+        touchState.lastSingleTouch = null;
+    }
+}
+
+function onWheel(e) {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    playerZoom = Math.max(0.1, Math.min(20, playerZoom * zoomFactor));
+    updateCameraView(currentViewState);
+}
+
+function applyScreenPan(dxPx, dyPx) {
+    // Convert screen pixels to world units based on current camera view
+    if (!camera) return;
+    const viewWidth = camera.right - camera.left;
+    const viewHeight = camera.top - camera.bottom;
+    const screenW = window.innerWidth;
+    const screenH = window.innerHeight;
+    playerPanX -= (dxPx / screenW) * viewWidth;
+    playerPanY += (dyPx / screenH) * viewHeight; // Y inverted (screen Y down, world Y up)
+}
+
+function pinchDistance(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function pinchCenter(a, b) {
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
 
 // --- Start Application ---
 document.addEventListener('DOMContentLoaded', init); // Initialize after DOM is loaded
