@@ -1,49 +1,125 @@
 /* static/css/style.css */
-/* Consolidated styles for Dynamic Map Renderer */
-/* v1.2 - Fixes for Fog UI - Allow polygon click in idle */
+/* COMMAND DECK TERMINAL — Fallout / Mothership / Aliens aesthetic */
+/* v2.0 */
 
-/* --- General Body & Layout --- */
+/* =====================================================================
+   CSS CUSTOM PROPERTIES — Terminal Palette
+   ===================================================================== */
+:root {
+    --term-green:        #33ff66;
+    --term-green-dim:    #1a9940;
+    --term-green-bright: #66ffaa;
+    --term-amber:        #ffb000;
+    --term-amber-dim:    #8a6000;
+    --term-amber-bright: #ffd966;
+    --term-red:          #ff3333;
+    --term-cyan:         #00ffff;
+
+    --bg-black:          #050505;
+    --bg-panel:          #0a0d08;
+    --bg-input:          #0c1208;
+    --bg-button:         #112210;
+    --bg-button-hover:   #1a3318;
+    --bg-popup:          rgba(8, 14, 6, 0.95);
+
+    --border-green:      #1a5c2a;
+    --border-bright:     #33ff66;
+
+    --glow-green:        0 0 6px rgba(51, 255, 102, 0.4);
+    --glow-green-strong: 0 0 10px rgba(51, 255, 102, 0.6), 0 0 20px rgba(51, 255, 102, 0.2);
+    --glow-amber:        0 0 6px rgba(255, 176, 0, 0.5);
+    --glow-amber-strong: 0 0 10px rgba(255, 176, 0, 0.6), 0 0 20px rgba(255, 176, 0, 0.2);
+
+    --font-terminal:     'Courier New', Courier, monospace;
+}
+
+
+/* =====================================================================
+   GLOBAL RESET & BASE
+   ===================================================================== */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
 body {
-    font-family: sans-serif;
+    font-family: var(--font-terminal);
     margin: 0;
     padding: 0;
-    background-color: #f0f0f0; /* Default light grey for GM view body */
+    background-color: var(--bg-black);
+    color: var(--term-green);
     width: 100vw;
     height: 100vh;
-    overflow: hidden; /* Prevent body scrollbars */
-    display: flex; /* Use flexbox for main layout */
-    flex-direction: column; /* Stack header and main content */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
-/* Player view specific body background */
+/* Player view body override */
 body:has(#player-canvas) {
-    background-color: #000; /* Black background only for player view */
-    display: block; /* Override flex for player view */
+    background-color: #000;
+    display: block;
 }
 
+::selection {
+    background: var(--term-green-dim);
+    color: var(--term-green-bright);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-black);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--border-green);
+    border: 1px solid var(--bg-black);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--term-green-dim);
+}
+
+
+/* =====================================================================
+   HEADER — Ship designation bar
+   ===================================================================== */
 header {
-    flex-shrink: 0; /* Prevent header from shrinking */
-    background-color: #333;
-    color: white;
-    padding: 10px;
+    flex-shrink: 0;
+    background-color: var(--bg-black);
+    border-bottom: 1px solid var(--border-green);
+    color: var(--term-amber);
+    padding: 8px 16px;
     text-align: center;
-    height: 40px; /* Fixed height */
+    height: 40px;
     box-sizing: border-box;
+    text-shadow: var(--glow-amber);
+    letter-spacing: 2px;
+    text-transform: uppercase;
 }
 header h1 {
     margin: 0;
-    font-size: 1.4em;
-    line-height: 20px; /* Center text vertically */
+    font-family: var(--font-terminal);
+    font-size: 1.1em;
+    font-weight: normal;
+    line-height: 24px;
 }
 
+
+/* =====================================================================
+   MAIN LAYOUT
+   ===================================================================== */
 .main-content {
-    flex-grow: 1; /* Allow main content to fill remaining height */
-    display: flex; /* Side-by-side panels */
-    overflow: hidden; /* Prevent content overflow */
-    height: calc(100vh - 40px); /* Full height minus header */
+    flex-grow: 1;
+    display: flex;
+    overflow: hidden;
+    height: calc(100vh - 40px);
 }
 
-/* --- Player View Specific Styles --- */
+
+/* =====================================================================
+   PLAYER VIEW
+   ===================================================================== */
 #player-canvas {
     display: block;
     width: 100%;
@@ -54,273 +130,354 @@ header h1 {
     background-color: transparent;
 }
 
-#status { /* Status message overlay */
+#status {
     position: absolute;
     top: 10px;
     left: 10px;
-    background-color: rgba(0, 0, 0, 0.7);
-    color: #0f0; /* Green text */
-    padding: 5px 10px;
-    border-radius: 3px;
-    font-family: monospace;
-    font-size: 0.9em;
-    display: none; /* Hidden by default */
+    background-color: rgba(5, 5, 5, 0.85);
+    color: var(--term-green);
+    padding: 6px 12px;
+    border: 1px solid var(--border-green);
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
+    display: none;
     z-index: 10;
+    text-shadow: var(--glow-green);
+    letter-spacing: 1px;
 }
 
-/* --- GM View: Controls Panel --- */
+
+/* =====================================================================
+   GM CONTROLS PANEL — Left-side command console
+   ===================================================================== */
 .controls-panel {
     width: 350px;
     min-width: 300px;
-    padding: 15px;
-    background-color: #f8f9fa;
-    border-right: 1px solid #dee2e6;
-    overflow-y: auto; /* Allow scrolling if controls exceed height */
+    padding: 12px;
+    background-color: var(--bg-panel);
+    border-right: 1px solid var(--border-green);
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
 }
 
+/* --- Control groups --- */
 .gm-controls {
-    margin-bottom: 15px;
+    margin-bottom: 12px;
 }
 .gm-controls label {
     display: block;
-    margin-bottom: 5px;
-    font-weight: 600;
-    font-size: 0.9em;
-    color: #333;
+    margin-bottom: 4px;
+    font-weight: normal;
+    font-size: 0.85em;
+    color: var(--term-green);
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
+
+/* --- Shared input / select / button styles --- */
 .gm-controls select,
 .gm-controls input[type="text"],
 .gm-controls input[type="number"],
-.gm-controls input[type="file"],
+.gm-controls input[type="file"] {
+    width: 100%;
+    padding: 6px 8px;
+    margin-bottom: 5px;
+    border: 1px solid var(--border-green);
+    background-color: var(--bg-input);
+    color: var(--term-green);
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
+}
+.gm-controls select:focus,
+.gm-controls input[type="text"]:focus,
+.gm-controls input[type="number"]:focus {
+    outline: none;
+    border-color: var(--term-green);
+    box-shadow: var(--glow-green);
+}
+
+.gm-controls select option {
+    background-color: var(--bg-panel);
+    color: var(--term-green);
+}
+
+/* --- Buttons --- */
 .gm-controls button {
     width: 100%;
-    padding: 8px 10px;
-    margin-bottom: 5px; /* Consistent spacing */
-    border-radius: 4px;
-    border: 1px solid #ccc;
-    box-sizing: border-box;
-    font-size: 0.9em;
+    padding: 7px 10px;
+    margin-bottom: 5px;
+    border: 1px solid var(--term-green-dim);
+    background-color: var(--bg-button);
+    color: var(--term-green);
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s ease;
 }
+.gm-controls button:hover {
+    background-color: var(--bg-button-hover);
+    border-color: var(--term-green);
+    text-shadow: var(--glow-green);
+    box-shadow: var(--glow-green);
+}
+.gm-controls button:disabled {
+    background-color: var(--bg-black);
+    border-color: #1a1a1a;
+    color: #333;
+    cursor: not-allowed;
+    text-shadow: none;
+    box-shadow: none;
+}
+
+/* --- Range sliders --- */
 .gm-controls input[type="range"] {
     width: 100%;
     margin-top: 3px;
     margin-bottom: 5px;
+    accent-color: var(--term-green);
 }
+
+/* --- Checkboxes --- */
 .gm-controls input[type="checkbox"] {
     margin-right: 5px;
     vertical-align: middle;
-    width: auto; /* Let checkbox size itself */
+    width: auto;
+    accent-color: var(--term-green);
 }
 .gm-controls label:has(input[type="checkbox"]) {
-    display: inline-block; /* Allow label text next to checkbox */
+    display: inline-block;
     margin-bottom: 5px;
 }
+
+/* --- Slider value readout --- */
 .gm-controls label > span.slider-value {
     margin-left: 8px;
-    font-family: monospace;
-    font-size: 0.9em;
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
     font-weight: normal;
-    color: #555;
-}
-.gm-controls fieldset {
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    padding: 10px 15px;
-    margin-top: 10px;
-    background-color: #fff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-.gm-controls legend {
-    font-weight: 600;
-    padding: 0 5px;
-    font-size: 1em;
-    color: #333;
-}
-.gm-controls button {
-    background-color: #007bff;
-    color: white;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-    border: none;
-}
-.gm-controls button:hover {
-    background-color: #0056b3;
-}
-.gm-controls button:disabled {
-    background-color: #cccccc;
-    cursor: not-allowed;
-}
-#upload-status {
-    font-size: 0.9em;
-    margin-top: 5px;
-    min-height: 1.2em; /* Prevent layout shift */
+    color: var(--term-amber);
+    text-shadow: var(--glow-amber);
 }
 
-/* --- GM View: Map Panel --- */
+/* --- Fieldsets --- */
+.gm-controls fieldset {
+    border: 1px solid var(--border-green);
+    padding: 10px 12px;
+    margin-top: 8px;
+    background-color: rgba(10, 20, 10, 0.5);
+}
+.gm-controls legend {
+    font-weight: normal;
+    padding: 0 6px;
+    font-size: 0.9em;
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-shadow: var(--glow-amber);
+}
+
+/* Hint text in controls */
+.gm-controls p {
+    color: var(--term-green-dim);
+    font-size: 0.78em;
+}
+
+#upload-status {
+    font-size: 0.85em;
+    margin-top: 5px;
+    min-height: 1.2em;
+    color: var(--term-amber);
+}
+h3 {
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.95em;
+    font-weight: normal;
+    text-shadow: var(--glow-amber);
+    margin-bottom: 8px;
+}
+
+
+/* =====================================================================
+   GM MAP PANEL — Main viewport
+   ===================================================================== */
 .map-view-panel {
-    position: relative; /* Needed for positioning overlay/popup */
-    flex-grow: 1; /* Take remaining space */
-    padding: 15px;
+    position: relative;
+    flex-grow: 1;
+    padding: 10px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    overflow: auto; /* Allow scrolling if map is huge */
-    background-color: #e9ecef;
+    overflow: auto;
+    background-color: var(--bg-black);
     box-sizing: border-box;
+    border-left: 1px solid var(--border-green);
 }
 .map-view-panel h2 {
     margin-top: 0;
     margin-bottom: 10px;
-    color: #333;
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
-/* --- GM View: Map Preview Area --- */
+/* --- Map display area --- */
 #gm-map-display {
-    position: relative; /* Make this the positioning context for SVG */
-    margin: 10px 0;
-    border: 1px solid #ccc;
-    width: 100%; /* Take full width of panel */
-    max-width: 95%; /* Limit max width slightly */
+    position: relative;
+    margin: 6px 0;
+    border: 1px solid var(--border-green);
+    width: 100%;
+    max-width: 95%;
     min-height: 200px;
-    max-height: 75vh; /* Limit max height */
-    overflow: hidden; /* Hide parts of image/SVG outside this box */
-    background-color: #fff;
-    display: flex; /* Center the image */
+    max-height: 75vh;
+    overflow: hidden;
+    background-color: #030503;
+    display: flex;
     justify-content: center;
     align-items: center;
-    border-radius: 4px;
-    box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+    box-shadow: inset 0 0 15px rgba(51, 255, 102, 0.05), var(--glow-green);
 }
 #gm-map-image {
-    border: 2px solid #007bff; /* Clearer border around the actual image */
+    border: 1px solid var(--term-green-dim);
     box-sizing: border-box;
-    display: block; /* Behavior for image */
-    max-width: 100%; /* Ensure image fits within display area */
-    max-height: 100%; /* Ensure image fits within display area */
-    height: auto; /* Maintain aspect ratio */
-    width: auto; /* Maintain aspect ratio */
-    object-fit: contain; /* Ensure whole image is visible */
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    height: auto;
+    width: auto;
+    object-fit: contain;
 }
 #gm-map-placeholder {
     margin-top: 20px;
-    color: #666;
-    font-style: italic;
+    color: var(--term-green-dim);
+    font-style: normal;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-size: 0.9em;
 }
 
-/* --- GM View: SVG Overlay & Fog/Masking Styles --- */
+
+/* =====================================================================
+   SVG OVERLAY & FOG / MASKING
+   ===================================================================== */
 #gm-svg-overlay {
     position: absolute;
-    top: 0; /* Align with #gm-map-display */
-    left: 0; /* Align with #gm-map-display */
-    width: 100%; /* Cover #gm-map-display */
-    height: 100%; /* Cover #gm-map-display */
-    pointer-events: none; /* Allow clicks through by default (for background clicks) */
-    z-index: 10; /* Sit above map image */
-    /* border: 1px dashed red; */ /* Optional: Debugging */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
 }
-/* Enable pointer events on overlay only when actively needed for drawing/eyedropper */
-#gm-svg-overlay.drawing-active,
-#gm-svg-overlay.eyedropper-active {
+#gm-svg-overlay.drawing-active {
     pointer-events: auto;
+    cursor: crosshair;
 }
-/* Set cursor styles based on mode */
-#gm-svg-overlay.drawing-active { cursor: crosshair; }
-#gm-svg-overlay.eyedropper-active { cursor: copy; }
 #gm-svg-overlay.dragging-active { cursor: grabbing; pointer-events: auto; }
 
-
-/* SVG elements used for drawing (temporary) */
+/* Drawing elements */
 #gm-svg-overlay .fog-polygon-drawing {
     fill: none;
-    stroke: #ffff00; /* Yellow drawing lines */
+    stroke: var(--term-amber);
     stroke-width: 2;
     stroke-dasharray: 4 4;
-    pointer-events: none; /* Drawing elements shouldn't be interactive */
+    pointer-events: none;
 }
 #gm-svg-overlay .fog-polygon-vertex {
-    fill: #ffff00; /* Yellow vertex points */
-    stroke: #333333;
+    fill: var(--term-amber);
+    stroke: var(--bg-black);
     stroke-width: 1;
-    pointer-events: none; /* Drawing elements shouldn't be interactive */
+    pointer-events: none;
 }
 #gm-svg-overlay .fog-polygon-rubberband {
     fill: none;
-    stroke: #ffff00; /* Yellow rubber band line */
+    stroke: var(--term-amber);
     stroke-width: 1;
     stroke-dasharray: 2 2;
-    pointer-events: none; /* Drawing elements shouldn't be interactive */
+    pointer-events: none;
 }
 
-/* Completed SVG polygons */
+/* Completed polygons */
 #gm-svg-overlay .fog-polygon-complete {
-    /* fill is set dynamically via JS */
-    stroke: #cccccc; /* Default light grey border */
+    stroke: var(--term-green-dim);
     stroke-width: 1;
-    cursor: pointer; /* Indicate they are clickable */
-    opacity: 0.6; /* Make them semi-transparent so map below is visible */
-    /* *** ADDED: Allow clicks on completed polygons even if overlay has pointer-events: none *** */
+    cursor: grab;
+    opacity: 0.6;
     pointer-events: auto;
 }
 #gm-svg-overlay .fog-polygon-complete:hover {
-    stroke: #ffffff; /* White border on hover */
+    stroke: var(--term-green);
     stroke-width: 2;
-    opacity: 0.75; /* Slightly less transparent on hover */
+    opacity: 0.75;
 }
 #gm-svg-overlay .fog-polygon-selected {
-     stroke: #00ffff; /* Cyan stroke for selected */
-     stroke-width: 3 !important; /* Use important to override hover potentially */
-     opacity: 0.8 !important; /* Use important to override hover potentially */
+    stroke: var(--term-cyan) !important;
+    stroke-width: 3 !important;
+    opacity: 0.8 !important;
+}
+#gm-svg-overlay.drawing-active .fog-polygon-complete {
+    cursor: pointer;
 }
 
-/* Vertex editing handles on selected polygons */
+/* Vertex handles */
 #gm-svg-overlay .fog-vertex-handle {
-    fill: #ffffff;
-    stroke: #007bff;
+    fill: var(--term-green);
+    stroke: var(--bg-black);
     stroke-width: 2;
     cursor: grab;
-    pointer-events: auto;  /* Must be clickable even when overlay has pointer-events: none */
+    pointer-events: auto;
 }
 #gm-svg-overlay .fog-vertex-handle:hover {
-    fill: #007bff;
-    stroke: #ffffff;
+    fill: var(--term-amber);
+    stroke: var(--bg-black);
     r: 7;
 }
 
-/* Resize handles for circle/ellipse shapes */
+/* Resize handles */
 #gm-svg-overlay .fog-resize-handle {
-    fill: #ffffff;
-    stroke: #007bff;
+    fill: var(--term-green);
+    stroke: var(--bg-black);
     stroke-width: 2;
     pointer-events: auto;
 }
 #gm-svg-overlay .fog-resize-handle:hover {
-    fill: #007bff;
-    stroke: #ffffff;
+    fill: var(--term-amber);
+    stroke: var(--bg-black);
     r: 8;
 }
 
-/* Shape preview polygon (during click-drag shape drawing) */
+/* Edge resize handles (square/rectangle side-drag) */
+#gm-svg-overlay .fog-edge-handle {
+    fill: var(--term-amber);
+    stroke: var(--bg-black);
+    stroke-width: 2;
+    pointer-events: auto;
+}
+#gm-svg-overlay .fog-edge-handle:hover {
+    fill: var(--term-green);
+    stroke: var(--bg-black);
+    r: 8;
+}
+
+/* Shape preview */
 #gm-svg-overlay .fog-shape-preview {
     fill: none;
-    stroke: #ffff00;
+    stroke: var(--term-amber);
     stroke-width: 2;
     stroke-dasharray: 6 3;
     opacity: 0.7;
     pointer-events: none;
 }
 
-/* Grab cursor on completed polygons when drawing is not active (for drag hint) */
-#gm-svg-overlay .fog-polygon-complete {
-    cursor: grab;
-}
-#gm-svg-overlay.drawing-active .fog-polygon-complete {
-    cursor: pointer;
-}
 
-/* Shape tool buttons container */
+/* =====================================================================
+   SHAPE TOOL BUTTONS
+   ===================================================================== */
 .shape-tools-container {
     display: flex;
     flex-wrap: wrap;
@@ -332,85 +489,72 @@ header h1 {
     flex: 1 1 auto;
     min-width: 50px;
     padding: 4px 6px !important;
-    font-size: 0.78em !important;
-    background-color: #555 !important;
-    color: #eee !important;
-    border: 1px solid #777 !important;
-    border-radius: 3px !important;
+    font-family: var(--font-terminal) !important;
+    font-size: 0.75em !important;
+    background-color: var(--bg-button) !important;
+    color: var(--term-green) !important;
+    border: 1px solid var(--border-green) !important;
     cursor: pointer;
     text-align: center;
-    transition: background-color 0.15s ease;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+    transition: all 0.15s ease;
 }
 .shape-tool-btn:hover {
-    background-color: #666 !important;
+    background-color: var(--bg-button-hover) !important;
+    border-color: var(--term-green) !important;
+    text-shadow: var(--glow-green) !important;
 }
 .shape-tool-btn.shape-tool-active {
-    background-color: #007bff !important;
-    border-color: #0056b3 !important;
-    color: #fff !important;
+    background-color: var(--term-green-dim) !important;
+    border-color: var(--term-green) !important;
+    color: var(--bg-black) !important;
+    text-shadow: none !important;
 }
 
-/* Hidden Canvas for Eyedropper */
-#eyedropper-canvas {
-    display: none; /* Keep it hidden */
-}
 
-/* Fog Interaction Popup */
-#fog-interaction-popup {
-    position: absolute; /* Positioned relative to map-view-panel */
-    display: none; /* Hidden by default */
-    background-color: rgba(50, 50, 50, 0.9);
-    border: 1px solid #aaa;
-    border-radius: 5px;
-    padding: 5px;
-    z-index: 20; /* Above SVG overlay */
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
-}
-#fog-interaction-popup button {
-    background: none;
-    border: 1px solid #ccc;
-    color: #eee;
-    padding: 4px 8px;
-    margin: 2px;
-    cursor: pointer;
-    font-size: 0.8em;
-    min-width: 60px;
-    border-radius: 3px;
-}
-#fog-interaction-popup button:hover {
-    background-color: #555;
-    border-color: #fff;
-}
-
-/* Token Interaction Popup */
-#token-interaction-popup {
-    position: absolute;
-    display: none;
-    background-color: rgba(50, 50, 50, 0.9);
-    border: 1px solid #aaa;
-    border-radius: 5px;
-    padding: 5px;
+/* =====================================================================
+   INTERACTION POPUPS — Terminal-style context menus
+   ===================================================================== */
+#fog-interaction-popup,
+#token-interaction-popup,
+#token-context-popup {
+    background-color: var(--bg-popup);
+    border: 1px solid var(--term-green-dim);
+    padding: 4px;
     z-index: 20;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+    box-shadow: var(--glow-green), 0 4px 12px rgba(0, 0, 0, 0.8);
 }
-#token-interaction-popup button {
-    background: none;
-    border: 1px solid #ccc;
-    color: #eee;
+#fog-interaction-popup { position: absolute; display: none; }
+#token-interaction-popup { position: absolute; display: none; }
+#token-context-popup { position: fixed; display: none; z-index: 100; }
+
+#fog-interaction-popup button,
+#token-interaction-popup button,
+#token-context-popup button {
+    background: var(--bg-button);
+    border: 1px solid var(--border-green);
+    color: var(--term-green);
     padding: 4px 8px;
     margin: 2px;
     cursor: pointer;
-    font-size: 0.8em;
+    font-family: var(--font-terminal);
+    font-size: 0.78em;
     min-width: 60px;
-    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s ease;
 }
-#token-interaction-popup button:hover {
-    background-color: #555;
-    border-color: #fff;
+#fog-interaction-popup button:hover,
+#token-interaction-popup button:hover,
+#token-context-popup button:hover {
+    background-color: var(--bg-button-hover);
+    border-color: var(--term-green);
+    text-shadow: var(--glow-green);
+    color: var(--term-green-bright);
 }
 
-/* Color input anchored inside token popup — invisible but positioned so the
-   browser's native color picker dialog opens near the popup, not at (0,0). */
+/* Color input anchored inside token popup */
 .token-popup-color-input {
     position: absolute;
     bottom: 0;
@@ -425,122 +569,136 @@ header h1 {
     overflow: hidden;
 }
 
-/* Player Token Context Popup */
-#token-context-popup {
-    position: fixed;
-    display: none;
-    background-color: rgba(50, 50, 50, 0.9);
-    border: 1px solid #aaa;
-    border-radius: 5px;
-    padding: 5px;
-    z-index: 100;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
-}
-#token-context-popup button {
-    background: none;
-    border: 1px solid #ccc;
-    color: #eee;
-    padding: 4px 8px;
-    margin: 2px;
-    cursor: pointer;
-    font-size: 0.8em;
-    min-width: 60px;
-    border-radius: 3px;
-}
-#token-context-popup button:hover {
-    background-color: #555;
-    border-color: #fff;
-}
 
-/* Fog Controls in sidebar */
-.fog-controls label { /* Style label for color display */
-     display: inline-block !important; /* Override general label block style */
-     margin-bottom: 0 !important;
-     margin-right: 5px;
-     vertical-align: middle; /* Align label with color swatch */
-}
-#fog-color-display { /* Color swatch */
-     display: inline-block;
-     width: 20px;
-     height: 20px;
-     border: 1px solid #ccc;
-     vertical-align: middle;
-     margin-left: 8px;
-     background-color: #000000; /* Default */
+/* =====================================================================
+   FOG CONTROLS — Sidebar section
+   ===================================================================== */
+.fog-controls label {
+    display: inline-block !important;
+    margin-bottom: 0 !important;
+    margin-right: 5px;
+    vertical-align: middle;
 }
 
 
-/* --- GM View: Session Info Area --- */
+/* =====================================================================
+   SESSION INFO — Bottom panel
+   ===================================================================== */
 .session-info {
-    margin-top: auto; /* Push to bottom of controls panel */
-    padding-top: 15px;
-    border-top: 1px solid #dee2e6;
-    font-size: 0.85em;
-    background-color: #f0f0f0; /* Match body background */
+    margin-top: auto;
     padding: 10px;
-    border-radius: 4px;
+    border-top: 1px solid var(--border-green);
+    font-size: 0.82em;
+    background-color: rgba(10, 20, 10, 0.4);
 }
-.session-info p { margin: 5px 0; }
-.session-info code { background-color: #e0e0e0; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
-.session-info label { font-weight: bold; margin-bottom: 3px; display: block;}
+.session-info p {
+    margin: 4px 0;
+    color: var(--term-green-dim);
+}
+.session-info code {
+    background-color: var(--bg-input);
+    padding: 2px 5px;
+    border: 1px solid var(--border-green);
+    font-family: var(--font-terminal);
+    color: var(--term-green);
+}
+.session-info label {
+    font-weight: normal;
+    margin-bottom: 3px;
+    display: block;
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.9em;
+    text-shadow: var(--glow-amber);
+}
+.session-info input[type="text"],
 .session-info input[readonly] {
     width: 100%;
     box-sizing: border-box;
-    padding: 5px;
-    border: 1px solid #ccc;
-    background-color: #eee;
-    font-family: monospace;
-    font-size: 0.9em;
+    padding: 5px 8px;
+    border: 1px solid var(--border-green);
+    background-color: var(--bg-input);
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
     margin-top: 2px;
     cursor: text;
+    color: var(--term-green);
 }
-/* Align input and button */
+.session-info input[type="text"]:focus,
+.session-info input[readonly]:focus {
+    outline: none;
+    border-color: var(--term-green);
+    box-shadow: var(--glow-green);
+}
 .session-info div:has(input) {
     display: flex;
     align-items: center;
 }
 #copy-lan-player-url, #show-qr-code {
     padding: 4px 8px;
-    font-size: 0.8em;
+    font-family: var(--font-terminal);
+    font-size: 0.78em;
     margin-left: 5px;
     cursor: pointer;
     vertical-align: middle;
     flex-shrink: 0;
+    background-color: var(--bg-button);
+    border: 1px solid var(--border-green);
+    color: var(--term-green);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s ease;
+}
+#copy-lan-player-url:hover, #show-qr-code:hover {
+    background-color: var(--bg-button-hover);
+    border-color: var(--term-green);
+    text-shadow: var(--glow-green);
 }
 #show-qr-code {
-    font-weight: bold;
+    font-weight: normal;
 }
 #lan-copy-status {
-    font-size: 0.8em;
+    font-size: 0.78em;
     margin-top: 3px;
     min-height: 1em;
-    color: green;
+    color: var(--term-green);
+    text-shadow: var(--glow-green);
 }
 
-/* --- QR Code Modal --- */
+
+/* =====================================================================
+   QR CODE MODAL
+   ===================================================================== */
 .qr-modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.85);
     z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 .qr-modal-content {
-    background: #1e1e1e;
-    color: #eee;
-    border-radius: 10px;
+    background: var(--bg-panel);
+    color: var(--term-green);
+    border: 1px solid var(--term-green-dim);
     padding: 30px;
     text-align: center;
     position: relative;
     max-width: 360px;
     width: 90%;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    box-shadow: var(--glow-green-strong), 0 8px 32px rgba(0, 0, 0, 0.8);
 }
 .qr-modal-content h3 {
     margin: 0 0 18px 0;
-    font-size: 1.1em;
+    font-family: var(--font-terminal);
+    font-size: 1em;
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: var(--glow-amber);
+    font-weight: normal;
 }
 .qr-modal-close {
     position: absolute;
@@ -548,42 +706,55 @@ header h1 {
     right: 12px;
     background: none;
     border: none;
-    color: #aaa;
+    color: var(--term-green-dim);
     font-size: 1.5em;
     cursor: pointer;
     line-height: 1;
+    font-family: var(--font-terminal);
 }
-.qr-modal-close:hover { color: #fff; }
+.qr-modal-close:hover {
+    color: var(--term-green);
+    text-shadow: var(--glow-green);
+}
 #qr-code-container {
     display: inline-block;
     padding: 12px;
-    background: #fff;
-    border-radius: 6px;
+    background: #111;
+    border: 1px solid var(--border-green);
 }
 #qr-code-container canvas, #qr-code-container img {
     display: block;
 }
+#qr-modal-url {
+    color: var(--term-green-dim) !important;
+}
 
-/* --- Token Styles: GM SVG --- */
+
+/* =====================================================================
+   TOKENS — GM SVG
+   ===================================================================== */
 .token-group {
     cursor: grab;
     pointer-events: auto;
 }
 .token-group:hover circle {
-    stroke: #00ffff;
+    stroke: var(--term-cyan);
     stroke-width: 2;
 }
 .token-group text {
     pointer-events: none;
     user-select: none;
-    font-family: sans-serif;
+    font-family: var(--font-terminal);
     font-weight: bold;
     font-size: 14px;
     text-anchor: middle;
     dominant-baseline: central;
 }
 
-/* --- Token Color Presets (shared GM/Player) --- */
+
+/* =====================================================================
+   TOKEN COLOR PRESETS (shared GM / Player)
+   ===================================================================== */
 .token-color-presets {
     display: flex;
     gap: 4px;
@@ -600,14 +771,17 @@ header h1 {
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .token-color-swatch:hover {
-    border-color: #aaa;
+    border-color: var(--term-green-dim);
 }
 .token-color-swatch.token-color-active {
-    border-color: #00ffff;
+    border-color: var(--term-cyan);
     box-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
 }
 
-/* --- Token Styles: Player Overlay --- */
+
+/* =====================================================================
+   TOKENS — Player overlay
+   ===================================================================== */
 #token-overlay {
     position: absolute;
     top: 0;
@@ -625,37 +799,40 @@ header h1 {
     transform: translate(-50%, -50%);
     pointer-events: auto;
     cursor: grab;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.7);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: sans-serif;
+    font-family: var(--font-terminal);
     font-weight: bold;
-    font-size: 13px;
+    font-size: 12px;
     user-select: none;
     touch-action: none;
     z-index: 6;
-    border: 2px solid rgba(255, 255, 255, 0.6);
+    border: 2px solid rgba(255, 255, 255, 0.5);
     box-sizing: border-box;
 }
 .player-token:hover {
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+    box-shadow: 0 0 12px rgba(51, 255, 102, 0.4);
     border-color: #fff;
 }
 
-/* --- Token Toolbar: Player --- */
+
+/* =====================================================================
+   TOKEN TOOLBAR — Player (bottom-right HUD element)
+   ===================================================================== */
 #token-toolbar {
     position: fixed;
     bottom: 16px;
     right: 16px;
-    background-color: rgba(30, 30, 30, 0.9);
-    border-radius: 8px;
+    background-color: var(--bg-popup);
+    border: 1px solid var(--border-green);
     padding: 8px;
     z-index: 20;
     display: flex;
     align-items: center;
     gap: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--glow-green), 0 4px 12px rgba(0, 0, 0, 0.7);
 }
 #token-toolbar .token-settings-group {
     display: none;
@@ -666,32 +843,43 @@ header h1 {
     display: flex;
 }
 #player-toggle-token {
-    background-color: #555;
-    color: #eee;
-    border: 1px solid #777;
-    border-radius: 4px;
+    background-color: var(--bg-button);
+    color: var(--term-green);
+    border: 1px solid var(--border-green);
     padding: 6px 10px;
     cursor: pointer;
-    font-size: 0.85em;
+    font-family: var(--font-terminal);
+    font-size: 0.8em;
     white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s ease;
 }
 #player-toggle-token:hover {
-    background-color: #666;
+    background-color: var(--bg-button-hover);
+    border-color: var(--term-green);
+    text-shadow: var(--glow-green);
 }
 #player-toggle-token.active {
-    background-color: #007bff;
-    border-color: #0056b3;
-    color: #fff;
+    background-color: var(--term-green-dim);
+    border-color: var(--term-green);
+    color: var(--bg-black);
+    text-shadow: none;
 }
 #player-token-label {
     width: 32px;
     padding: 4px;
     text-align: center;
-    border-radius: 4px;
-    border: 1px solid #555;
-    background-color: #333;
-    color: #eee;
-    font-size: 0.9em;
+    border: 1px solid var(--border-green);
+    background-color: var(--bg-input);
+    color: var(--term-green);
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
+}
+#player-token-label:focus {
+    outline: none;
+    border-color: var(--term-green);
+    box-shadow: var(--glow-green);
 }
 #player-token-colors {
     display: flex;
@@ -701,4 +889,3 @@ header h1 {
     width: 22px;
     height: 22px;
 }
-

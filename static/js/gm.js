@@ -51,6 +51,10 @@ let resizeOriginalVertices = null;    // deep copy of all vertices before resize
 let resizeAnchorCorner = null;       // the fixed opposite corner {x,y} normalized
 let resizeShapeType = null;          // shape type of the polygon being resized
 
+// --- Edge Resize Handle State ---
+let resizingEdgeIndex = null;       // 0-3 for which edge is being dragged
+let edgeResizeBBox = null;          // {minX, minY, maxX, maxY} bounding box during edge drag
+
 // --- Undo/Redo State ---
 const fogUndoStack = [];
 const fogRedoStack = [];
@@ -100,14 +104,13 @@ const viewXInput = document.getElementById('view-center-x');
 const viewYInput = document.getElementById('view-center-y');
 const viewScaleInput = document.getElementById('view-scale');
 const toggleFogDrawingButton = document.getElementById('toggle-fog-drawing-button');
-const fogColorDisplay = document.getElementById('fog-color-display');
+const fogColorPresets = document.getElementById('fog-color-presets');
 const fogInteractionPopup = document.getElementById('fog-interaction-popup');
 const fogDeleteButton = document.getElementById('fog-delete-button');
 const fogColorButton = document.getElementById('fog-color-button');
+const fogColorInput = document.getElementById('fog-color-input');
 svgOverlay = document.getElementById('gm-svg-overlay');
 const shapeToolsContainer = document.getElementById('shape-tools-container');
-const eyedropperCanvas = document.getElementById('eyedropper-canvas');
-const eyedropperCtx = eyedropperCanvas ? eyedropperCanvas.getContext('2d', { willReadFrequently: true }) : null;
 const mapViewPanel = document.querySelector('.map-view-panel');
 const toggleTokenModeButton = document.getElementById('toggle-token-mode-button');
 const tokenSettings = document.getElementById('token-settings');
@@ -124,7 +127,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log("GM View Initializing (v1.76 - Load Help.png)..."); // Version updated
     console.log(`GM controlling HARDCODED Session ID: ${currentSessionId}`);
 
-    if (!eyedropperCtx) { console.error("Failed to get 2D context for eyedropper canvas!"); }
     if (!mapViewPanel) { console.error("Failed to get reference to .map-view-panel for popup positioning!"); }
     if (!svgOverlay) svgOverlay = document.getElementById('gm-svg-overlay');
     setupSvgLayers();
@@ -387,7 +389,6 @@ function resetUI() {
     }
     if (fogInteractionPopup) fogInteractionPopup.style.display = 'none';
     lastFogColor = FOG_DEFAULT_COLOR;
-    updateFogColorDisplay();
     // Reset token state
     isTokenModeEnabled = false;
     draggingTokenId = null;
@@ -468,7 +469,6 @@ async function loadMapDataForGM(filename) {
         if (viewScaleInput) viewScaleInput.disabled = false;
         if (toggleFogDrawingButton) toggleFogDrawingButton.disabled = false;
         if (toggleTokenModeButton) toggleTokenModeButton.disabled = false;
-        updateFogColorDisplay();
 
         console.log("Setting up image load handlers...");
         if (gmMapImage) {
@@ -479,7 +479,6 @@ async function loadMapDataForGM(filename) {
                     try {
                         updateMapAndSvgDimensions();
                         drawExistingFogPolygons();
-                        prepareEyedropperCanvas();
                         console.log("<<< gmMapImage.onload finished.");
                     } catch (e) {
                         console.error("Error in gmMapImage.onload:", e);
@@ -642,8 +641,8 @@ function setupEventListeners() {
     document.addEventListener('keydown', handleKeyDown);
     if (fogDeleteButton) fogDeleteButton.addEventListener('click', handleDeletePolygon);
     else console.error("fogDeleteButton missing!");
-    if (fogColorButton) fogColorButton.addEventListener('click', handleChangeColorStart);
-    else console.error("fogColorButton missing!");
+    setupFogColorPicker();
+    setupFogColorSwatches();
     window.addEventListener('resize', updateMapAndSvgDimensions);
     // Token event listeners
     if (toggleTokenModeButton) toggleTokenModeButton.addEventListener('click', handleToggleTokenMode);
@@ -818,7 +817,7 @@ function handleToggleFogDrawing() {
     }
     isDrawingFogEnabled = !isDrawingFogEnabled;
     if (isDrawingFogEnabled) {
-        if (currentInteractionMode === 'polygon_selected' || currentInteractionMode === 'eyedropper_active') {
+        if (currentInteractionMode === 'polygon_selected') {
             deselectPolygon();
         }
         setInteractionMode('drawing_enabled');
@@ -843,7 +842,7 @@ function setInteractionMode(mode) {
     if (currentInteractionMode === mode) return;
     console.log(`Switching Mode: ${currentInteractionMode} -> ${mode}`);
     currentInteractionMode = mode;
-    svgOverlay.classList.remove('drawing-active', 'eyedropper-active', 'dragging-active');
+    svgOverlay.classList.remove('drawing-active', 'dragging-active');
     if (fogInteractionPopup) fogInteractionPopup.style.display = 'none';
     if (tokenInteractionPopup) tokenInteractionPopup.style.display = 'none';
     switch (mode) {
@@ -879,11 +878,6 @@ function setInteractionMode(mode) {
         case 'editing_vertex':
             svgOverlay.classList.add('drawing-active', 'dragging-active');
             break;
-        case 'eyedropper_active':
-            isDrawingFogEnabled = false;
-            if (toggleFogDrawingButton) toggleFogDrawingButton.textContent = "Draw New Polygons";
-            svgOverlay.classList.add('eyedropper-active');
-            break;
         case 'token_placing':
             svgOverlay.classList.add('drawing-active');
             break;
@@ -900,18 +894,15 @@ function handleKeyDown(event) {
     switch (event.key) {
         case 'Escape':
             if (currentInteractionMode === 'editing_vertex') {
-                // Check if we're resizing or vertex-editing
-                if (resizingCornerIndex !== null) cancelResizeDrag();
+                // Check if we're edge-resizing, corner-resizing, or vertex-editing
+                if (resizingEdgeIndex !== null) cancelEdgeDrag();
+                else if (resizingCornerIndex !== null) cancelResizeDrag();
                 else cancelVertexDrag();
             }
             else if (currentInteractionMode === 'dragging_polygon') cancelDrag();
             else if (currentInteractionMode === 'drawing_shape') cancelCurrentShape();
             else if (currentInteractionMode === 'drawing_polygon') cancelCurrentPolygon();
             else if (currentInteractionMode === 'polygon_selected') deselectPolygon();
-            else if (currentInteractionMode === 'eyedropper_active') {
-                setInteractionMode('polygon_selected');
-                showInteractionPopup(event);
-            }
             else if (currentInteractionMode === 'token_selected') deselectToken();
             break;
         case 'Delete':
@@ -969,16 +960,13 @@ function handleSvgClick(event) {
     }
 
     // Skip click if it's on a vertex/resize handle (handled by mousedown)
-    if (target.closest('.fog-vertex-handle') || target.closest('.fog-resize-handle')) return;
+    if (target.closest('.fog-vertex-handle') || target.closest('.fog-resize-handle') || target.closest('.fog-edge-handle')) return;
     const clickedOnPolygonElement = target.closest('.fog-polygon-complete');
     console.log(`SVG Click - Mode: ${currentInteractionMode}, Target:`, target);
     switch (currentInteractionMode) {
         case 'token_selected':
             if (!target.closest('.token-group') && !target.closest('#token-interaction-popup')) deselectToken();
             return;
-        case 'eyedropper_active':
-            handleEyedropperClick(event);
-            break;
         case 'polygon_selected':
             if (!clickedOnPolygonElement && !target.closest('#fog-interaction-popup')) deselectPolygon();
             else if (clickedOnPolygonElement && clickedOnPolygonElement.dataset.polygonId !== selectedPolygonId) handlePolygonSelect(event);
@@ -1076,6 +1064,17 @@ function handleSvgMouseDown(event) {
         }
     }
 
+    // --- Edge handle: start edge drag ---
+    const clickedEdgeHandle = target.closest('.fog-edge-handle');
+    if (clickedEdgeHandle && selectedPolygonId && currentInteractionMode === 'polygon_selected') {
+        event.preventDefault();
+        const edgeIndex = parseInt(clickedEdgeHandle.dataset.edgeIndex, 10);
+        if (!isNaN(edgeIndex)) {
+            startEdgeDrag(event, edgeIndex);
+            return;
+        }
+    }
+
     const clickedPolygon = target.closest('.fog-polygon-complete');
 
     // --- Shape tool: start drawing shape ---
@@ -1097,7 +1096,7 @@ function handleSvgMouseDown(event) {
     }
 
     // --- Drag: start potential drag on a completed polygon ---
-    if (clickedPolygon && currentInteractionMode !== 'eyedropper_active' && currentInteractionMode !== 'drawing_polygon' && currentInteractionMode !== 'drawing_shape') {
+    if (clickedPolygon && currentInteractionMode !== 'drawing_polygon' && currentInteractionMode !== 'drawing_shape') {
         event.preventDefault();
         const polygonId = clickedPolygon.dataset.polygonId;
         const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === polygonId);
@@ -1253,6 +1252,12 @@ function showVertexHandles(polygonData) {
         showResizeHandles(polygonData);
         return;
     }
+    // For squares/rectangles, show corner + edge midpoint handles (Figma-style)
+    if (polygonData.shapeType === 'square' || polygonData.shapeType === 'rectangle') {
+        showResizeHandles(polygonData);
+        showEdgeHandles(polygonData);
+        return;
+    }
     polygonData.vertices.forEach((vertex, i) => {
         const svgP = relativeToSvgCoords(vertex);
         if (!svgP) return;
@@ -1293,6 +1298,37 @@ function showResizeHandles(polygonData) {
         circle.setAttribute('class', 'fog-resize-handle');
         circle.dataset.cornerIndex = i;
         circle.style.cursor = cursors[i];
+        svgVertexHandlesLayer.appendChild(circle);
+    });
+}
+
+function showEdgeHandles(polygonData) {
+    if (!svgVertexHandlesLayer || !polygonData?.vertices || polygonData.vertices.length === 0) return;
+    // Compute bounding box from vertices
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    polygonData.vertices.forEach(v => {
+        if (v.x < minX) minX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y > maxY) maxY = v.y;
+    });
+    // 4 edge midpoints: top, right, bottom, left
+    const edges = [
+        { x: (minX + maxX) / 2, y: minY,               cursor: 'ns-resize'  },  // 0: top
+        { x: maxX,               y: (minY + maxY) / 2,  cursor: 'ew-resize'  },  // 1: right
+        { x: (minX + maxX) / 2, y: maxY,               cursor: 'ns-resize'  },  // 2: bottom
+        { x: minX,               y: (minY + maxY) / 2,  cursor: 'ew-resize'  },  // 3: left
+    ];
+    edges.forEach((edge, i) => {
+        const svgP = relativeToSvgCoords(edge);
+        if (!svgP) return;
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', svgP.x);
+        circle.setAttribute('cy', svgP.y);
+        circle.setAttribute('r', 7);
+        circle.setAttribute('class', 'fog-edge-handle');
+        circle.dataset.edgeIndex = i;
+        circle.style.cursor = edge.cursor;
         svgVertexHandlesLayer.appendChild(circle);
     });
 }
@@ -1542,6 +1578,133 @@ function cancelResizeDrag() {
     console.log("Resize drag cancelled.");
 }
 
+// --- Edge Resize Drag Handlers ---
+
+function startEdgeDrag(event, edgeIndex) {
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (!polygonData) return;
+
+    resizingEdgeIndex = edgeIndex;
+    resizeOriginalVertices = polygonData.vertices.map(v => ({ x: v.x, y: v.y }));
+
+    // Compute bounding box
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    polygonData.vertices.forEach(v => {
+        if (v.x < minX) minX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y > maxY) maxY = v.y;
+    });
+    edgeResizeBBox = { minX, minY, maxX, maxY };
+
+    capturePendingUndo();
+    setInteractionMode('editing_vertex');
+
+    document.addEventListener('mousemove', handleDocumentMouseMoveEdge);
+    document.addEventListener('mouseup', handleDocumentMouseUpEdge);
+}
+
+function handleDocumentMouseMoveEdge(event) {
+    if (resizingEdgeIndex === null || !selectedPolygonId || !edgeResizeBBox) return;
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (!polygonData) return;
+
+    const svgRect = svgOverlay.getBoundingClientRect();
+    const currentSvgPoint = {
+        x: event.clientX - svgRect.left,
+        y: event.clientY - svgRect.top
+    };
+    const currentNorm = svgToRelativeCoords(currentSvgPoint);
+    if (!currentNorm) return;
+
+    // Adjust the appropriate edge of the bounding box
+    let { minX, minY, maxX, maxY } = edgeResizeBBox;
+    switch (resizingEdgeIndex) {
+        case 0: minY = currentNorm.y; break;  // top
+        case 1: maxX = currentNorm.x; break;  // right
+        case 2: maxY = currentNorm.y; break;  // bottom
+        case 3: minX = currentNorm.x; break;  // left
+    }
+
+    // Regenerate 4 vertices from adjusted bounding box, clamped to [0,1]
+    const newVertices = [
+        { x: clampNorm(minX), y: clampNorm(minY) },
+        { x: clampNorm(maxX), y: clampNorm(minY) },
+        { x: clampNorm(maxX), y: clampNorm(maxY) },
+        { x: clampNorm(minX), y: clampNorm(maxY) },
+    ];
+
+    polygonData.vertices = newVertices;
+    updatePolygonSvgPosition(polygonData);
+
+    // Refresh edge handles
+    hideVertexHandles();
+    showEdgeHandles(polygonData);
+}
+
+function handleDocumentMouseUpEdge(event) {
+    document.removeEventListener('mousemove', handleDocumentMouseMoveEdge);
+    document.removeEventListener('mouseup', handleDocumentMouseUpEdge);
+
+    if (resizingEdgeIndex !== null && selectedPolygonId) {
+        const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygonData) {
+            polygonData.vertices.forEach(v => {
+                v.x = clampNorm(v.x);
+                v.y = clampNorm(v.y);
+            });
+            updatePolygonSvgPosition(polygonData);
+        }
+
+        commitPendingUndo();
+        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        debouncedAutoSave();
+        console.log("Edge resize drag completed.");
+
+        resizingEdgeIndex = null;
+        resizeOriginalVertices = null;
+        edgeResizeBBox = null;
+
+        setInteractionMode('polygon_selected');
+        if (polygonData) showVertexHandles(polygonData);
+    } else {
+        resizingEdgeIndex = null;
+        resizeOriginalVertices = null;
+        edgeResizeBBox = null;
+        setInteractionMode('polygon_selected');
+    }
+
+    dragJustCompleted = true;
+}
+
+function cancelEdgeDrag() {
+    if (resizingEdgeIndex === null || !selectedPolygonId || !resizeOriginalVertices) {
+        resizingEdgeIndex = null;
+        resizeOriginalVertices = null;
+        edgeResizeBBox = null;
+        return;
+    }
+
+    // Revert vertices to original
+    const polygonData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+    if (polygonData) {
+        polygonData.vertices = resizeOriginalVertices.map(v => ({ x: v.x, y: v.y }));
+        updatePolygonSvgPosition(polygonData);
+    }
+
+    document.removeEventListener('mousemove', handleDocumentMouseMoveEdge);
+    document.removeEventListener('mouseup', handleDocumentMouseUpEdge);
+
+    resizingEdgeIndex = null;
+    resizeOriginalVertices = null;
+    edgeResizeBBox = null;
+    discardPendingUndo();
+
+    setInteractionMode('polygon_selected');
+    if (polygonData) showVertexHandles(polygonData);
+    console.log("Edge resize drag cancelled.");
+}
+
 // --- Shape Tool Handlers ---
 
 function handleShapeToolSelect(event) {
@@ -1632,7 +1795,7 @@ function handleDocumentMouseUpShape(event) {
         id: generateUniqueId(),
         color: lastFogColor,
         vertices: vertices,
-        ...(['circle', 'ellipse'].includes(currentShapeTool) && { shapeType: currentShapeTool })
+        ...(currentShapeTool !== 'free' && currentShapeTool && { shapeType: currentShapeTool })
     };
     console.log("Shape completed:", newPolygon);
 
@@ -1837,7 +2000,6 @@ function deselectPolygon(changeMode = true) {
         if (isDrawingFogEnabled) setInteractionMode('drawing_enabled');
         else setInteractionMode('idle');
     }
-    if (svgOverlay.classList.contains('eyedropper-active')) svgOverlay.classList.remove('eyedropper-active');
 }
 // Show Interaction Popup (Unchanged)
 function showInteractionPopup(event) {
@@ -1879,66 +2041,40 @@ function handleDeletePolygon() {
     }
     deselectPolygon();
 }
-// Start Color Change / Eyedropper (Unchanged)
-function handleChangeColorStart() {
-    if (!selectedPolygonId) return;
-    console.log("Activating eyedropper for:", selectedPolygonId);
-    prepareEyedropperCanvas();
-    setInteractionMode('eyedropper_active');
-    if (fogInteractionPopup) fogInteractionPopup.style.display = 'none';
+// --- Fog Color Picker (swatch + input type="color" on popup) ---
+function setupFogColorSwatches() {
+    TokenShared.setupColorSwatches(fogColorPresets, (color) => {
+        lastFogColor = color;
+    });
 }
-// Handle Eyedropper Click (Unchanged)
-function handleEyedropperClick(event) {
-    if (currentInteractionMode !== 'eyedropper_active' || !selectedPolygonId || !eyedropperCtx || !gmMapRect) return;
-    const svgPoint = getSvgCoordinates(event);
-    if (!svgPoint) return;
-    const relativePoint = svgToRelativeCoords(svgPoint);
-    if (!relativePoint) return;
-    const canvasX = Math.floor(relativePoint.x * eyedropperCanvas.width);
-    const canvasY = Math.floor(relativePoint.y * eyedropperCanvas.height);
-    try {
-        const pixelData = eyedropperCtx.getImageData(canvasX, canvasY, 1, 1).data;
-        const newColorHex = rgbToHex(pixelData[0], pixelData[1], pixelData[2]);
-        console.log(`Eyedropper: (${canvasX},${canvasY}) -> Hex(${newColorHex})`);
-        const polygon = currentState.fog_of_war.hidden_polygons.find(p => p.id === selectedPolygonId);
-        if (polygon && polygon.color !== newColorHex) {
+
+function setupFogColorPicker() {
+    if (!fogColorButton || !fogColorInput) return;
+    fogColorButton.addEventListener('click', () => {
+        if (!selectedPolygonId) return;
+        const polygon = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygon) fogColorInput.value = polygon.color || '#000000';
+        fogColorInput.click();
+    });
+    fogColorInput.addEventListener('input', () => {
+        if (!selectedPolygonId) return;
+        const newColor = fogColorInput.value;
+        const polygon = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
+        if (polygon && polygon.color !== newColor) {
             pushFogUndoSnapshot();
-            polygon.color = newColorHex;
-            lastFogColor = newColorHex;
-            updateFogColorDisplay();
+            polygon.color = newColor;
+            lastFogColor = newColor;
             if (svgCompletedLayer) {
-                const elementToUpdate = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
-                if (elementToUpdate) elementToUpdate.setAttribute('fill', newColorHex);
+                const el = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
+                if (el) el.setAttribute('fill', newColor);
             }
-            sendUpdate({
-                fog_of_war: currentState.fog_of_war
-            });
+            sendUpdate({ fog_of_war: currentState.fog_of_war });
             debouncedAutoSave();
-            console.log("Polygon color updated.");
-        } else if (!polygon) console.warn("Polygon not found for color update.");
-    } catch (e) {
-        console.error("Error using eyedropper:", e);
-        alert("Could not sample color.");
-    } finally {
-        setInteractionMode('polygon_selected');
-        showInteractionPopup(event);
-    }
-}
-// Prepare Eyedropper Canvas (Unchanged)
-function prepareEyedropperCanvas() {
-    if (!eyedropperCtx || !gmMapImage || gmMapImage.naturalWidth === 0) {
-        console.error("Cannot prep eyedropper.");
-        return;
-    }
-    console.log("Prepping eyedropper canvas...");
-    eyedropperCanvas.width = gmMapImage.naturalWidth;
-    eyedropperCanvas.height = gmMapImage.naturalHeight;
-    eyedropperCtx.drawImage(gmMapImage, 0, 0, eyedropperCanvas.width, eyedropperCanvas.height);
-    console.log(`Eyedropper canvas ready.`);
-}
-// Update Fog Color Display (Unchanged)
-function updateFogColorDisplay() {
-    if (fogColorDisplay) fogColorDisplay.style.backgroundColor = lastFogColor;
+        }
+    });
+    fogColorInput.addEventListener('change', () => {
+        deselectPolygon();
+    });
 }
 
 // --- SVG Drawing Functions (Unchanged) ---
@@ -2336,7 +2472,7 @@ function handleToggleTokenMode() {
         if (isDrawingFogEnabled) {
             handleToggleFogDrawing();
         }
-        if (currentInteractionMode === 'polygon_selected' || currentInteractionMode === 'eyedropper_active') {
+        if (currentInteractionMode === 'polygon_selected') {
             deselectPolygon();
         }
         setInteractionMode('token_placing');
