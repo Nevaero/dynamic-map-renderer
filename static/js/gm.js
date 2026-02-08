@@ -2,7 +2,15 @@
 // Version: 1.76 (Load Help.png on Startup)
 
 // --- Global Variables ---
-const currentSessionId = "my-game"; // Hardcoded Session ID
+function generateSessionId() {
+    const chars = 'abcdefghjkmnpqrstuvwxyz23456789'; // no ambiguous chars
+    let id = '';
+    for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)];
+    return id;
+}
+let currentSessionId = generateSessionId();
+let lanIp = null;
+let lanPort = 5000;
 let availableFilters = {};
 let mapList = [];
 let currentState = {}; // Holds the full state including filters, view, fog
@@ -58,6 +66,17 @@ let shapePreviewElement = null; // SVG polygon for live preview
 let debounceTimer = null;
 const DEBOUNCE_DELAY = 1500;
 
+// --- Token State ---
+let isTokenModeEnabled = false;
+let currentTokenLabel = 'A';
+let currentTokenColor = '#ff0000';
+let tokens = [];
+let draggingTokenId = null;
+let draggingTokenStartSvg = null;
+let svgTokenLayer = null;
+let selectedTokenId = null;
+let tokenDragOccurred = false;
+
 // --- DOM Elements ---
 const filterSelect = document.getElementById('filter-select');
 const mapSelect = document.getElementById('map-select');
@@ -68,6 +87,7 @@ const filterControlsContainer = document.getElementById('filter-controls');
 const mapUploadForm = document.getElementById('map-upload-form');
 const mapFileInput = document.getElementById('map-file-input');
 const uploadStatus = document.getElementById('upload-status');
+const sessionIdInput = document.getElementById('session-id-input');
 const lanPlayerUrlDisplay = document.getElementById('lan-player-url-display');
 const copyLanPlayerUrlButton = document.getElementById('copy-lan-player-url');
 const lanCopyStatusDisplay = document.getElementById('lan-copy-status');
@@ -89,6 +109,14 @@ const shapeToolsContainer = document.getElementById('shape-tools-container');
 const eyedropperCanvas = document.getElementById('eyedropper-canvas');
 const eyedropperCtx = eyedropperCanvas ? eyedropperCanvas.getContext('2d', { willReadFrequently: true }) : null;
 const mapViewPanel = document.querySelector('.map-view-panel');
+const toggleTokenModeButton = document.getElementById('toggle-token-mode-button');
+const tokenSettings = document.getElementById('token-settings');
+const tokenLabelInput = document.getElementById('token-label-input');
+const tokenColorPresets = document.getElementById('token-color-presets');
+const tokenInteractionPopup = document.getElementById('token-interaction-popup');
+const tokenDeleteButton = document.getElementById('token-delete-button');
+const tokenColorButton = document.getElementById('token-color-button');
+const tokenColorInput = document.getElementById('token-color-input');
 
 
 // --- Initialization ---
@@ -122,6 +150,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // *** END ADDED ***
 
         console.log("Setting up UI, WebSocket, Listeners...");
+        if (sessionIdInput) sessionIdInput.value = currentSessionId;
         fetchLanInfo(); // Fetch and display LAN player URL
         connectWebSocket();
         setupEventListeners();
@@ -151,6 +180,9 @@ function setupSvgLayers() {
     svgDrawingLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svgDrawingLayer.id = 'fog-drawing-layer';
     svgOverlay.appendChild(svgDrawingLayer);
+    svgTokenLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    svgTokenLayer.id = 'token-layer';
+    svgOverlay.appendChild(svgTokenLayer);
     console.log("SVG layers setup.");
 }
 
@@ -172,6 +204,8 @@ function connectWebSocket() {
     console.log("Setting up Socket.IO event handlers...");
     socket.on('connect', () => {
         console.log(`WebSocket connected: ${socket.id}`);
+        // Join the session room so we receive token broadcasts
+        socket.emit('join_session', { session_id: currentSessionId });
     });
     socket.on('disconnect', (reason) => {
         console.warn(`WebSocket disconnected: ${reason}`);
@@ -181,6 +215,11 @@ function connectWebSocket() {
     });
     socket.on('error', (data) => {
         console.error('Server WS Error:', data.message || data);
+    });
+    TokenShared.onTokensUpdate(socket, (newTokens) => {
+        tokens = newTokens;
+        renderAllTokens();
+        console.log(`Tokens updated: ${tokens.length} token(s)`);
     });
     console.log("WebSocket event handlers set up.");
 }
@@ -349,6 +388,18 @@ function resetUI() {
     if (fogInteractionPopup) fogInteractionPopup.style.display = 'none';
     lastFogColor = FOG_DEFAULT_COLOR;
     updateFogColorDisplay();
+    // Reset token state
+    isTokenModeEnabled = false;
+    draggingTokenId = null;
+    draggingTokenStartSvg = null;
+    selectedTokenId = null;
+    if (tokenInteractionPopup) tokenInteractionPopup.style.display = 'none';
+    if (toggleTokenModeButton) {
+        toggleTokenModeButton.textContent = 'Enable Token Mode';
+        toggleTokenModeButton.disabled = true;
+    }
+    if (tokenSettings) tokenSettings.style.display = 'none';
+    if (svgTokenLayer) svgTokenLayer.innerHTML = '';
     gmMapRect = null;
     gmMapDisplayRect = null;
     console.log(" -> resetUI complete.");
@@ -416,6 +467,7 @@ async function loadMapDataForGM(filename) {
         if (viewYInput) viewYInput.disabled = false;
         if (viewScaleInput) viewScaleInput.disabled = false;
         if (toggleFogDrawingButton) toggleFogDrawingButton.disabled = false;
+        if (toggleTokenModeButton) toggleTokenModeButton.disabled = false;
         updateFogColorDisplay();
 
         console.log("Setting up image load handlers...");
@@ -568,6 +620,7 @@ function setupEventListeners() {
     else console.error("viewYInput missing!");
     if (viewScaleInput) viewScaleInput.addEventListener('input', handleViewChange);
     else console.error("viewScaleInput missing!");
+    if (sessionIdInput) sessionIdInput.addEventListener('change', handleSessionIdChange);
     if (copyLanPlayerUrlButton) copyLanPlayerUrlButton.addEventListener('click', copyLanPlayerUrlToClipboard);
     if (showQrCodeButton) showQrCodeButton.addEventListener('click', openQrModal);
     if (qrModalClose) qrModalClose.addEventListener('click', closeQrModal);
@@ -592,6 +645,14 @@ function setupEventListeners() {
     if (fogColorButton) fogColorButton.addEventListener('click', handleChangeColorStart);
     else console.error("fogColorButton missing!");
     window.addEventListener('resize', updateMapAndSvgDimensions);
+    // Token event listeners
+    if (toggleTokenModeButton) toggleTokenModeButton.addEventListener('click', handleToggleTokenMode);
+    setupTokenColorSwatches();
+    setupTokenLabelInput();
+    if (svgOverlay) svgOverlay.addEventListener('contextmenu', (e) => {
+        if (e.target.closest('.token-group')) e.preventDefault();
+    });
+    setupTokenContextPopupGM();
     console.log("Event listeners setup complete.");
 }
 
@@ -749,6 +810,12 @@ function handleViewChange(event) {
 
 // Toggle Logic (Unchanged)
 function handleToggleFogDrawing() {
+    // Disable token mode if active (mutual exclusion)
+    if (isTokenModeEnabled) {
+        isTokenModeEnabled = false;
+        if (toggleTokenModeButton) toggleTokenModeButton.textContent = 'Enable Token Mode';
+        if (tokenSettings) tokenSettings.style.display = 'none';
+    }
     isDrawingFogEnabled = !isDrawingFogEnabled;
     if (isDrawingFogEnabled) {
         if (currentInteractionMode === 'polygon_selected' || currentInteractionMode === 'eyedropper_active') {
@@ -778,6 +845,7 @@ function setInteractionMode(mode) {
     currentInteractionMode = mode;
     svgOverlay.classList.remove('drawing-active', 'eyedropper-active', 'dragging-active');
     if (fogInteractionPopup) fogInteractionPopup.style.display = 'none';
+    if (tokenInteractionPopup) tokenInteractionPopup.style.display = 'none';
     switch (mode) {
         case 'idle':
             isDrawingFogEnabled = false;
@@ -816,6 +884,15 @@ function setInteractionMode(mode) {
             if (toggleFogDrawingButton) toggleFogDrawingButton.textContent = "Draw New Polygons";
             svgOverlay.classList.add('eyedropper-active');
             break;
+        case 'token_placing':
+            svgOverlay.classList.add('drawing-active');
+            break;
+        case 'token_dragging':
+            svgOverlay.classList.add('drawing-active', 'dragging-active');
+            break;
+        case 'token_selected':
+            svgOverlay.classList.add('drawing-active');
+            break;
     }
 }
 // KeyDown Handler (Unchanged)
@@ -835,10 +912,12 @@ function handleKeyDown(event) {
                 setInteractionMode('polygon_selected');
                 showInteractionPopup(event);
             }
+            else if (currentInteractionMode === 'token_selected') deselectToken();
             break;
         case 'Delete':
         case 'Backspace':
             if (currentInteractionMode === 'polygon_selected' && selectedPolygonId) handleDeletePolygon();
+            if (currentInteractionMode === 'token_selected' && selectedTokenId) handleDeleteToken();
             break;
         case 'z':
         case 'Z':
@@ -869,6 +948,7 @@ function cancelCurrentPolygon() {
 
 // Main SVG Click Router (Unchanged)
 function handleSvgClick(event) {
+    console.log(`handleSvgClick called — mode: ${currentInteractionMode}, mapFile: ${!!currentMapFilename}, gmMapRect: ${!!gmMapRect}`);
     if (!currentMapFilename || !gmMapRect) return;
     // Guard: if a drag just completed, the click event fires right after mouseup — skip it
     if (dragJustCompleted) {
@@ -876,11 +956,26 @@ function handleSvgClick(event) {
         return;
     }
     const target = event.target;
+
+    // --- Token placing: place a token on click (unless clicking an existing token) ---
+    if (currentInteractionMode === 'token_placing' && !target.closest('.token-group')) {
+        const svgPoint = getSvgCoordinates(event);
+        if (!svgPoint) { console.warn("Token place: getSvgCoordinates returned null"); return; }
+        const relPoint = svgToRelativeCoords(svgPoint);
+        if (!relPoint) { console.warn("Token place: svgToRelativeCoords returned null"); return; }
+        console.log(`Placing token '${currentTokenLabel}' at (${relPoint.x.toFixed(3)}, ${relPoint.y.toFixed(3)}) in session ${currentSessionId}`);
+        TokenShared.emitTokenPlace(socket, currentSessionId, currentTokenLabel, currentTokenColor, relPoint.x, relPoint.y);
+        return;
+    }
+
     // Skip click if it's on a vertex/resize handle (handled by mousedown)
     if (target.closest('.fog-vertex-handle') || target.closest('.fog-resize-handle')) return;
     const clickedOnPolygonElement = target.closest('.fog-polygon-complete');
     console.log(`SVG Click - Mode: ${currentInteractionMode}, Target:`, target);
     switch (currentInteractionMode) {
+        case 'token_selected':
+            if (!target.closest('.token-group') && !target.closest('#token-interaction-popup')) deselectToken();
+            return;
         case 'eyedropper_active':
             handleEyedropperClick(event);
             break;
@@ -942,6 +1037,22 @@ function handleSvgMouseMove(event) {
 function handleSvgMouseDown(event) {
     if (!currentMapFilename || !gmMapRect) return;
     const target = event.target;
+
+    // --- Token drag: start dragging a token ---
+    const clickedTokenGroup = target.closest('.token-group');
+    if (clickedTokenGroup) {
+        event.preventDefault();
+        const tokenId = clickedTokenGroup.dataset.tokenId;
+        if (!tokenId) return;
+        draggingTokenId = tokenId;
+        tokenDragOccurred = false;
+        const svgPoint = getSvgCoordinates(event);
+        draggingTokenStartSvg = svgPoint;
+        setInteractionMode('token_dragging');
+        document.addEventListener('mousemove', handleDocumentMouseMoveToken);
+        document.addEventListener('mouseup', handleDocumentMouseUpToken);
+        return;
+    }
 
     // --- Vertex handle: start vertex drag ---
     const clickedVertexHandle = target.closest('.fog-vertex-handle');
@@ -1928,6 +2039,7 @@ function updateMapAndSvgDimensions() {
     }
     console.log("Cached map rect:", gmMapRect);
     drawExistingFogPolygons();
+    renderAllTokens();
     // Refresh vertex handles if a polygon is selected
     if (selectedPolygonId) {
         const selData = currentState?.fog_of_war?.hidden_polygons?.find(p => p.id === selectedPolygonId);
@@ -2107,19 +2219,42 @@ function debouncedAutoSave() {
 }
 
 // --- Session/Player URL Display ---
+function updatePlayerUrl() {
+    if (!lanPlayerUrlDisplay || !lanIp) return;
+    lanPlayerUrlDisplay.value = `http://${lanIp}:${lanPort}/player?session=${encodeURIComponent(currentSessionId)}`;
+}
+
 function fetchLanInfo() {
     fetch('/api/lan-info')
         .then(r => r.json())
         .then(data => {
-            if (lanPlayerUrlDisplay && data.ip) {
-                const sessionId = currentSessionId || 'my-game';
-                lanPlayerUrlDisplay.value = `http://${data.ip}:${data.port}/player?session=${encodeURIComponent(sessionId)}`;
+            if (data.ip) {
+                lanIp = data.ip;
+                lanPort = data.port || 5000;
+                updatePlayerUrl();
             }
         })
         .catch(err => {
             console.warn("Could not fetch LAN info:", err);
             if (lanPlayerUrlDisplay) lanPlayerUrlDisplay.value = "Could not detect LAN IP";
         });
+}
+
+function handleSessionIdChange() {
+    if (!sessionIdInput) return;
+    const newId = sessionIdInput.value.trim();
+    const validPattern = /^[a-zA-Z0-9_-]{1,50}$/;
+    if (!validPattern.test(newId)) {
+        sessionIdInput.value = currentSessionId; // revert
+        return;
+    }
+    const oldId = currentSessionId;
+    currentSessionId = newId;
+    if (socket && socket.connected) {
+        socket.emit('leave_session', { session_id: oldId });
+        socket.emit('join_session', { session_id: currentSessionId });
+    }
+    updatePlayerUrl();
 }
 
 function copyLanPlayerUrlToClipboard() {
@@ -2185,12 +2320,164 @@ function generateUniqueId() {
 }
 
 function rgbToHex(r, g, b) {
-    r = Math.max(0, Math.min(255, Math.round(r)));
-    g = Math.max(0, Math.min(255, Math.round(g)));
-    b = Math.max(0, Math.min(255, Math.round(b)));
-    const componentToHex = (c) => {
-        const hex = c.toString(16);
-        return hex.length == 1 ? "0" + hex : hex;
-    };
-    return "#" + componentToHex(r) + componentToHex(g) + componentToHex(b).toUpperCase();
+    return TokenShared.rgbToHex(r, g, b);
+}
+
+// --- Token Functions ---
+
+function getContrastColor(hexColor) {
+    return TokenShared.getContrastColor(hexColor);
+}
+
+function handleToggleTokenMode() {
+    isTokenModeEnabled = !isTokenModeEnabled;
+    if (isTokenModeEnabled) {
+        // Disable fog drawing if active (mutual exclusion)
+        if (isDrawingFogEnabled) {
+            handleToggleFogDrawing();
+        }
+        if (currentInteractionMode === 'polygon_selected' || currentInteractionMode === 'eyedropper_active') {
+            deselectPolygon();
+        }
+        setInteractionMode('token_placing');
+        if (toggleTokenModeButton) toggleTokenModeButton.textContent = 'Disable Token Mode';
+        if (tokenSettings) tokenSettings.style.display = 'block';
+    } else {
+        setInteractionMode('idle');
+        if (toggleTokenModeButton) toggleTokenModeButton.textContent = 'Enable Token Mode';
+        if (tokenSettings) tokenSettings.style.display = 'none';
+    }
+}
+
+function renderAllTokens() {
+    if (!svgTokenLayer) return;
+    svgTokenLayer.innerHTML = '';
+    tokens.forEach(token => {
+        const svgP = relativeToSvgCoords({ x: token.x, y: token.y });
+        if (!svgP) return;
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('class', 'token-group');
+        g.dataset.tokenId = token.id;
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', svgP.x);
+        circle.setAttribute('cy', svgP.y);
+        circle.setAttribute('r', 14);
+        circle.setAttribute('fill', token.color || '#ff0000');
+        circle.setAttribute('stroke', 'rgba(255,255,255,0.6)');
+        circle.setAttribute('stroke-width', '1.5');
+        g.appendChild(circle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', svgP.x);
+        text.setAttribute('y', svgP.y);
+        text.setAttribute('fill', getContrastColor(token.color || '#ff0000'));
+        text.textContent = token.label || '';
+        g.appendChild(text);
+        svgTokenLayer.appendChild(g);
+    });
+}
+
+function handleDocumentMouseMoveToken(event) {
+    if (!draggingTokenId || !svgTokenLayer) return;
+    tokenDragOccurred = true;
+    const svgRect = svgOverlay.getBoundingClientRect();
+    const svgPoint = { x: event.clientX - svgRect.left, y: event.clientY - svgRect.top };
+    // Update token SVG position locally for responsiveness
+    const g = svgTokenLayer.querySelector(`.token-group[data-token-id="${draggingTokenId}"]`);
+    if (g) {
+        const circle = g.querySelector('circle');
+        const text = g.querySelector('text');
+        if (circle) { circle.setAttribute('cx', svgPoint.x); circle.setAttribute('cy', svgPoint.y); }
+        if (text) { text.setAttribute('x', svgPoint.x); text.setAttribute('y', svgPoint.y); }
+    }
+}
+
+function handleDocumentMouseUpToken(event) {
+    document.removeEventListener('mousemove', handleDocumentMouseMoveToken);
+    document.removeEventListener('mouseup', handleDocumentMouseUpToken);
+    if (!draggingTokenId) return;
+    const tokenId = draggingTokenId;
+    if (tokenDragOccurred) {
+        // Actual drag — emit move
+        const svgRect = svgOverlay.getBoundingClientRect();
+        const svgPoint = { x: event.clientX - svgRect.left, y: event.clientY - svgRect.top };
+        const relPoint = svgToRelativeCoords(svgPoint);
+        if (relPoint) {
+            TokenShared.emitTokenMove(socket, currentSessionId, tokenId, relPoint.x, relPoint.y);
+        }
+        draggingTokenId = null;
+        draggingTokenStartSvg = null;
+        dragJustCompleted = true;
+        if (isTokenModeEnabled) {
+            setInteractionMode('token_placing');
+        } else {
+            setInteractionMode('idle');
+        }
+    } else {
+        // Simple click — open context popup
+        draggingTokenId = null;
+        draggingTokenStartSvg = null;
+        dragJustCompleted = true;
+        selectedTokenId = tokenId;
+        setInteractionMode('token_selected');
+        showTokenPopup(event);
+    }
+}
+
+function showTokenPopup(event) {
+    if (!tokenInteractionPopup || !svgOverlay || !mapViewPanel) return;
+    const svgClickPos = getSvgCoordinates(event);
+    if (!svgClickPos) return;
+    const popupWidth = tokenInteractionPopup.offsetWidth;
+    const popupHeight = tokenInteractionPopup.offsetHeight;
+    let popupLeft = svgClickPos.x + 10;
+    let popupTop = svgClickPos.y + 10;
+    if (popupLeft + popupWidth > mapViewPanel.clientWidth) popupLeft = svgClickPos.x - popupWidth - 10;
+    if (popupTop + popupHeight > mapViewPanel.clientHeight) popupTop = svgClickPos.y - popupHeight - 10;
+    popupLeft = Math.max(5, popupLeft);
+    popupTop = Math.max(5, popupTop);
+    tokenInteractionPopup.style.left = `${popupLeft}px`;
+    tokenInteractionPopup.style.top = `${popupTop}px`;
+    tokenInteractionPopup.style.display = 'block';
+}
+
+function deselectToken() {
+    selectedTokenId = null;
+    if (tokenInteractionPopup) tokenInteractionPopup.style.display = 'none';
+    if (isTokenModeEnabled) {
+        setInteractionMode('token_placing');
+    } else {
+        setInteractionMode('idle');
+    }
+}
+
+function handleDeleteToken() {
+    if (!selectedTokenId) return;
+    TokenShared.emitTokenRemove(socket, currentSessionId, selectedTokenId);
+    deselectToken();
+}
+
+function setupTokenContextPopupGM() {
+    TokenShared.setupTokenContextPopup({
+        popupEl: tokenInteractionPopup,
+        deleteBtnEl: tokenDeleteButton,
+        colorBtnEl: tokenColorButton,
+        colorInputEl: tokenColorInput,
+        getSocket: () => socket,
+        getSessionId: () => currentSessionId,
+        getSelectedId: () => selectedTokenId,
+        getTokens: () => tokens,
+        onDismiss: () => deselectToken()
+    });
+}
+
+function setupTokenColorSwatches() {
+    TokenShared.setupColorSwatches(tokenColorPresets, (color) => {
+        currentTokenColor = color;
+    });
+}
+
+function setupTokenLabelInput() {
+    TokenShared.setupLabelInput(tokenLabelInput, (label) => {
+        currentTokenLabel = label;
+    });
 }

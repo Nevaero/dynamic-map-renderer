@@ -138,6 +138,7 @@ LAN_IP = get_lan_ip()
 
 # --- In-Memory State Storage ---
 session_states = {}
+session_tokens = {}  # {session_id: [token_dict, ...]}
 
 # --- Helper Function Definitions ---
 # ... (allowed_map_file, get_map_config_path, load_map_config, save_map_config - unchanged, condensed) ...
@@ -448,7 +449,7 @@ def get_filters():
     return jsonify(client_safe_filters)
 @app.route('/api/lan-info', methods=['GET'])
 def get_lan_info():
-    return jsonify({"ip": LAN_IP, "port": 5000, "player_url": f"http://{LAN_IP}:5000/player?session=my-game"})
+    return jsonify({"ip": LAN_IP, "port": 5000})
 @app.route('/api/maps', methods=['GET'])
 def list_map_content():
     try:
@@ -500,7 +501,16 @@ def save_config_api(map_filename):
 def handle_connect(): logging.info(f"Client connected: {request.sid}")
 
 @socketio.on('disconnect')
-def handle_disconnect(): logging.info(f"Client disconnected: {request.sid}")
+def handle_disconnect():
+    logging.info(f"Client disconnected: {request.sid}")
+
+@socketio.on('leave_session')
+def handle_leave_session(data):
+    """Handles client leaving a session room."""
+    if not isinstance(data, dict) or 'session_id' not in data: return
+    session_id = data['session_id']
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id): return
+    leave_room(session_id); logging.info(f"Client {request.sid} left: {session_id}")
 
 @socketio.on('join_session')
 def handle_join_session(data):
@@ -526,6 +536,9 @@ def handle_join_session(data):
     if image_bytes:
         b64_data = base64.b64encode(image_bytes).decode('ascii')
         socketio_emit('map_image_data', {'b64': b64_data}, to=request.sid)
+    # Send current tokens for this session
+    current_tokens = session_tokens.get(session_id, [])
+    socketio_emit('tokens_update', {'tokens': current_tokens}, to=request.sid)
 
 @socketio.on('gm_update')
 def handle_gm_update(data):
@@ -589,6 +602,109 @@ def handle_gm_update(data):
     except Exception as e: logging.error(f"Error processing GM update session {session_id}: {e}", exc_info=True)
 
 
+# --- Token Socket Event Handlers ---
+
+@socketio.on('token_place')
+def handle_token_place(data):
+    """Place a new token on the map."""
+    if not isinstance(data, dict):
+        return
+    session_id = data.get('session_id')
+    token_data = data.get('token')
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
+        return
+    if not isinstance(token_data, dict):
+        return
+    label = str(token_data.get('label', 'A'))[:2]
+    color = token_data.get('color', '#ff0000')
+    x = token_data.get('x', 0.5)
+    y = token_data.get('y', 0.5)
+    # Validate color
+    if not isinstance(color, str) or not re.match(r'^#[0-9a-fA-F]{6}$', color):
+        color = '#ff0000'
+    # Clamp coordinates
+    x = max(0.0, min(1.0, float(x)))
+    y = max(0.0, min(1.0, float(y)))
+    token_id = f"tok_{int(time.time()*1000)}_{uuid4().hex[:5]}"
+    new_token = {
+        'id': token_id,
+        'label': label,
+        'color': color,
+        'x': x,
+        'y': y
+    }
+    if session_id not in session_tokens:
+        session_tokens[session_id] = []
+    session_tokens[session_id].append(new_token)
+    logging.info(f"Token placed: {token_id} in session {session_id} by {request.sid}")
+    socketio_emit('tokens_update', {'tokens': session_tokens[session_id]}, room=session_id)
+
+
+@socketio.on('token_move')
+def handle_token_move(data):
+    """Move an existing token."""
+    if not isinstance(data, dict):
+        return
+    session_id = data.get('session_id')
+    token_id = data.get('token_id')
+    x = data.get('x')
+    y = data.get('y')
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
+        return
+    if not token_id or x is None or y is None:
+        return
+    tokens = session_tokens.get(session_id, [])
+    for token in tokens:
+        if token['id'] == token_id:
+            token['x'] = max(0.0, min(1.0, float(x)))
+            token['y'] = max(0.0, min(1.0, float(y)))
+            logging.debug(f"Token moved: {token_id} to ({token['x']:.3f}, {token['y']:.3f})")
+            socketio_emit('tokens_update', {'tokens': tokens}, room=session_id)
+            return
+
+
+@socketio.on('token_remove')
+def handle_token_remove(data):
+    """Remove a token from the map."""
+    if not isinstance(data, dict):
+        return
+    session_id = data.get('session_id')
+    token_id = data.get('token_id')
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
+        return
+    if not token_id:
+        return
+    tokens = session_tokens.get(session_id, [])
+    before = len(tokens)
+    session_tokens[session_id] = [t for t in tokens if t['id'] != token_id]
+    if len(session_tokens[session_id]) < before:
+        logging.info(f"Token removed: {token_id} from session {session_id}")
+        socketio_emit('tokens_update', {'tokens': session_tokens[session_id]}, room=session_id)
+
+
+@socketio.on('token_update_color')
+def handle_token_update_color(data):
+    """Update a token's color."""
+    if not isinstance(data, dict):
+        return
+    session_id = data.get('session_id')
+    token_id = data.get('token_id')
+    color = data.get('color')
+    if not session_id or not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
+        return
+    if not token_id or not color:
+        return
+    if not isinstance(color, str) or not re.match(r'^#[0-9a-fA-F]{6}$', color):
+        return
+    tokens = session_tokens.get(session_id, [])
+    for token in tokens:
+        if token['id'] == token_id:
+            token['color'] = color
+            logging.info(f"Token color updated: {token_id} to {color}")
+            socketio_emit('tokens_update', {'tokens': tokens}, room=session_id)
+            return
+
+
 # --- Main Execution ---
 if __name__ == '__main__':
     cleanup_generated_maps() # Clear old maps on start
@@ -606,7 +722,7 @@ if __name__ == '__main__':
     print(f" Your LAN IP: {LAN_IP}")
     print("------------------------------------------")
     print(f" GM View (this machine): http://127.0.0.1:5000/")
-    print(f" Player View (LAN):      http://{LAN_IP}:5000/player?session=my-game")
+    print(f" Player View (LAN):      http://{LAN_IP}:5000/player?session=<session-id>")
     print("------------------------------------------")
     if is_frozen:
         print(" (Close this window to stop the server)")
@@ -618,5 +734,5 @@ if __name__ == '__main__':
         webbrowser.open("http://127.0.0.1:5000/")
     threading.Thread(target=open_browser, daemon=True).start()
 
-    socketio.run(app, debug=not is_frozen, host='0.0.0.0', port=5000, use_reloader=False)
+    socketio.run(app, debug=not is_frozen, host='0.0.0.0', port=5000, use_reloader=not is_frozen)
 

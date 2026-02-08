@@ -32,9 +32,20 @@ let touchState = {
     isPinching: false
 };
 
+// --- Token State ---
+let tokens = [];
+let isTokenPlacingActive = false;
+let playerTokenLabel = 'A';
+let playerTokenColor = '#ff0000';
+let draggingPlayerTokenId = null;
+let draggingPlayerTokenOffset = null;
+let selectedPlayerTokenId = null;
+let playerTokenDragOccurred = false;
+
 // --- DOM Elements ---
 const canvas = document.getElementById('player-canvas');
 const statusDiv = document.getElementById('status');
+const tokenOverlay = document.getElementById('token-overlay');
 
 
 // --- Initialization ---
@@ -90,6 +101,9 @@ async function init() {
     // Event Listeners and Connection...
     window.addEventListener('resize', onWindowResize, false);
     setupPlayerTouchControls();
+    setupTokenToolbar();
+    setupTokenCanvasClick();
+    setupPlayerTokenPopup();
     connectWebSocket();
     animate();
     console.log("Initialization sequence complete.");
@@ -144,6 +158,11 @@ function connectWebSocket() {
     socket.on('state_update', handleStateUpdate);
     socket.on('map_image_data', handleMapImageData);
     socket.on('error', (data) => { console.error('Server WS Error:', data.message || data); displayStatus(`SERVER ERROR.`); });
+    TokenShared.onTokensUpdate(socket, (newTokens) => {
+        tokens = newTokens;
+        renderPlayerTokens();
+        console.log(`Tokens updated: ${tokens.length} token(s)`);
+    });
     console.log("WebSocket event handlers set up.");
 }
 
@@ -374,6 +393,7 @@ function animate() {
     requestAnimationFrame(animate); if (isRenderingPaused || !renderer || !scene || !camera) return;
     const elapsedTime = clock.getElapsedTime(); if (material?.uniforms?.time) { material.uniforms.time.value = elapsedTime; }
     try { renderer.render(scene, camera); } catch (e) { console.error("Render loop error:", e); displayStatus(`ERROR rendering.`); isRenderingPaused = true; }
+    renderPlayerTokens();
  }
 
 // --- Utility & Fallbacks ---
@@ -452,7 +472,12 @@ function onPointerDown(e) {
         touchState.lastPinchCenter = pinchCenter(pts[0], pts[1]);
         touchState.lastSingleTouch = null;
     } else if (touchState.pointers.size === 1) {
-        touchState.lastSingleTouch = { x: e.clientX, y: e.clientY };
+        // Suppress single-finger pan when token placing is active (prevents pan on tap)
+        if (isTokenPlacingActive) {
+            touchState.lastSingleTouch = null;
+        } else {
+            touchState.lastSingleTouch = { x: e.clientX, y: e.clientY };
+        }
         touchState.isPinching = false;
     }
 }
@@ -534,6 +559,223 @@ function pinchDistance(a, b) {
 
 function pinchCenter(a, b) {
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+// --- Token: Coordinate Conversion ---
+
+function normalizedToScreenCoords(nx, ny) {
+    // Convert normalized map coords (0-1) to screen pixel coords
+    // Map coords: nx=0 is left, nx=1 is right, ny=0 is top, ny=1 is bottom
+    if (!camera || !planeMesh || !renderer) return null;
+    const planeWidth = planeMesh.scale.x;
+    const planeHeight = planeMesh.scale.y;
+    // World position on the plane: x maps to [-planeWidth/2, planeWidth/2], y maps to [planeHeight/2, -planeHeight/2]
+    const worldX = (nx - 0.5) * planeWidth;
+    const worldY = (0.5 - ny) * planeHeight;  // ny=0 is top => worldY = +planeHeight/2
+    const vec = new THREE.Vector3(worldX, worldY, 0);
+    vec.project(camera);
+    // NDC to screen pixels
+    const screenX = (vec.x * 0.5 + 0.5) * window.innerWidth;
+    const screenY = (-vec.y * 0.5 + 0.5) * window.innerHeight;
+    return { x: screenX, y: screenY };
+}
+
+function screenToNormalizedCoords(sx, sy) {
+    // Convert screen pixel coords to normalized map coords (0-1)
+    if (!camera || !planeMesh || !renderer) return null;
+    const planeWidth = planeMesh.scale.x;
+    const planeHeight = planeMesh.scale.y;
+    // Screen to NDC
+    const ndcX = (sx / window.innerWidth) * 2 - 1;
+    const ndcY = -(sy / window.innerHeight) * 2 + 1;
+    const vec = new THREE.Vector3(ndcX, ndcY, 0);
+    vec.unproject(camera);
+    // World to normalized
+    const nx = vec.x / planeWidth + 0.5;
+    const ny = 0.5 - vec.y / planeHeight;
+    return { x: nx, y: ny };
+}
+
+function getContrastColor(hexColor) {
+    return TokenShared.getContrastColor(hexColor);
+}
+
+// --- Token: Rendering ---
+
+function renderPlayerTokens() {
+    if (!tokenOverlay) return;
+    // Build a map of existing DOM tokens
+    const existingDivs = {};
+    tokenOverlay.querySelectorAll('.player-token').forEach(div => {
+        existingDivs[div.dataset.tokenId] = div;
+    });
+    const activeIds = new Set();
+    tokens.forEach(token => {
+        activeIds.add(token.id);
+        const screenPos = normalizedToScreenCoords(token.x, token.y);
+        if (!screenPos) return;
+        let div = existingDivs[token.id];
+        if (!div) {
+            div = document.createElement('div');
+            div.className = 'player-token';
+            div.dataset.tokenId = token.id;
+            div.addEventListener('pointerdown', onTokenPointerDown);
+            div.addEventListener('contextmenu', (e) => e.preventDefault());
+            tokenOverlay.appendChild(div);
+        }
+        // Skip position update if this token is being dragged (local drag handles position)
+        if (token.id !== draggingPlayerTokenId) {
+            div.style.left = `${screenPos.x}px`;
+            div.style.top = `${screenPos.y}px`;
+        }
+        div.style.backgroundColor = token.color || '#ff0000';
+        div.style.color = getContrastColor(token.color || '#ff0000');
+        div.textContent = token.label || '';
+    });
+    // Remove divs for tokens that no longer exist
+    for (const id in existingDivs) {
+        if (!activeIds.has(id)) {
+            existingDivs[id].remove();
+        }
+    }
+}
+
+// --- Token: Canvas Click (place token) ---
+
+function setupTokenCanvasClick() {
+    if (!canvas) return;
+    canvas.addEventListener('click', (e) => {
+        if (!isTokenPlacingActive) return;
+        if (!socket || !socket.connected || !currentSessionId) return;
+        const normalized = screenToNormalizedCoords(e.clientX, e.clientY);
+        if (!normalized) return;
+        // Only place if within map bounds (roughly 0-1)
+        if (normalized.x < 0 || normalized.x > 1 || normalized.y < 0 || normalized.y > 1) return;
+        TokenShared.emitTokenPlace(socket, currentSessionId, playerTokenLabel, playerTokenColor, normalized.x, normalized.y);
+    });
+}
+
+// --- Token: Drag Interaction ---
+
+function onTokenPointerDown(e) {
+    e.stopPropagation(); // Prevent pan
+    e.preventDefault();
+    const div = e.currentTarget;
+    const tokenId = div.dataset.tokenId;
+    if (!tokenId) return;
+    draggingPlayerTokenId = tokenId;
+    playerTokenDragOccurred = false;
+    // Compute offset between pointer and div center
+    const rect = div.getBoundingClientRect();
+    draggingPlayerTokenOffset = {
+        x: e.clientX - (rect.left + rect.width / 2),
+        y: e.clientY - (rect.top + rect.height / 2)
+    };
+    div.style.cursor = 'grabbing';
+    div.setPointerCapture(e.pointerId);
+    div.addEventListener('pointermove', onTokenPointerMove);
+    div.addEventListener('pointerup', onTokenPointerUp);
+    div.addEventListener('pointercancel', onTokenPointerUp);
+}
+
+function onTokenPointerMove(e) {
+    if (!draggingPlayerTokenId) return;
+    playerTokenDragOccurred = true;
+    const div = e.currentTarget;
+    // Move token div directly for responsive feedback
+    const newLeft = e.clientX - (draggingPlayerTokenOffset ? draggingPlayerTokenOffset.x : 0);
+    const newTop = e.clientY - (draggingPlayerTokenOffset ? draggingPlayerTokenOffset.y : 0);
+    div.style.left = `${newLeft}px`;
+    div.style.top = `${newTop}px`;
+}
+
+function onTokenPointerUp(e) {
+    const div = e.currentTarget;
+    div.style.cursor = 'grab';
+    div.removeEventListener('pointermove', onTokenPointerMove);
+    div.removeEventListener('pointerup', onTokenPointerUp);
+    div.removeEventListener('pointercancel', onTokenPointerUp);
+    div.releasePointerCapture(e.pointerId);
+    if (!draggingPlayerTokenId) return;
+    const tokenId = draggingPlayerTokenId;
+    if (playerTokenDragOccurred) {
+        // Actual drag — emit move
+        const finalX = e.clientX - (draggingPlayerTokenOffset ? draggingPlayerTokenOffset.x : 0);
+        const finalY = e.clientY - (draggingPlayerTokenOffset ? draggingPlayerTokenOffset.y : 0);
+        const normalized = screenToNormalizedCoords(finalX, finalY);
+        if (normalized) {
+            TokenShared.emitTokenMove(socket, currentSessionId, tokenId, normalized.x, normalized.y);
+        }
+    } else {
+        // Simple click — open context popup
+        selectedPlayerTokenId = tokenId;
+        showPlayerTokenPopup(e.clientX, e.clientY);
+    }
+    draggingPlayerTokenId = null;
+    draggingPlayerTokenOffset = null;
+}
+
+function showPlayerTokenPopup(x, y) {
+    const popup = document.getElementById('token-context-popup');
+    if (!popup) return;
+    const colorPicker = document.getElementById('player-token-color-picker');
+    if (colorPicker) colorPicker.style.display = 'none';
+    popup.style.left = `${x + 5}px`;
+    popup.style.top = `${y + 5}px`;
+    popup.style.display = 'block';
+    // Adjust if overflows viewport
+    const rect = popup.getBoundingClientRect();
+    if (rect.right > window.innerWidth) popup.style.left = `${x - rect.width - 5}px`;
+    if (rect.bottom > window.innerHeight) popup.style.top = `${y - rect.height - 5}px`;
+}
+
+function hidePlayerTokenPopup() {
+    const popup = document.getElementById('token-context-popup');
+    if (popup) popup.style.display = 'none';
+    selectedPlayerTokenId = null;
+}
+
+function setupPlayerTokenPopup() {
+    TokenShared.setupTokenContextPopup({
+        popupEl: document.getElementById('token-context-popup'),
+        deleteBtnEl: document.getElementById('player-token-delete-btn'),
+        colorBtnEl: document.getElementById('player-token-color-btn'),
+        colorInputEl: document.getElementById('player-token-color-input'),
+        getSocket: () => socket,
+        getSessionId: () => currentSessionId,
+        getSelectedId: () => selectedPlayerTokenId,
+        getTokens: () => tokens,
+        onDismiss: () => hidePlayerTokenPopup()
+    });
+}
+
+// --- Token: Toolbar Setup ---
+
+function setupTokenToolbar() {
+    const toggleBtn = document.getElementById('player-toggle-token');
+    const labelInput = document.getElementById('player-token-label');
+    const colorsContainer = document.getElementById('player-token-colors');
+    const toolbar = document.getElementById('token-toolbar');
+    if (!toggleBtn || !toolbar) return;
+
+    toggleBtn.addEventListener('click', () => {
+        isTokenPlacingActive = !isTokenPlacingActive;
+        toggleBtn.classList.toggle('active', isTokenPlacingActive);
+        toolbar.classList.toggle('expanded', isTokenPlacingActive);
+        if (isTokenPlacingActive) {
+            toggleBtn.textContent = 'Cancel';
+        } else {
+            toggleBtn.textContent = 'Token';
+        }
+    });
+
+    TokenShared.setupLabelInput(labelInput, (label) => {
+        playerTokenLabel = label;
+    });
+
+    TokenShared.setupColorSwatches(colorsContainer, (color) => {
+        playerTokenColor = color;
+    });
 }
 
 // --- Start Application ---

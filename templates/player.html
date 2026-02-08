@@ -14,11 +14,32 @@
 </head>
 <body>
     <canvas id="player-canvas"></canvas>
+    <div id="token-overlay"></div>
+    <div id="token-toolbar">
+        <button id="player-toggle-token">Token</button>
+        <div class="token-settings-group">
+            <input type="text" id="player-token-label" maxlength="2" value="A" title="Token label">
+            <div id="player-token-colors">
+                <div class="token-color-swatch token-color-active" data-color="#ff0000" style="background-color:#ff0000;" title="Red"></div>
+                <div class="token-color-swatch" data-color="#3388ff" style="background-color:#3388ff;" title="Blue"></div>
+                <div class="token-color-swatch" data-color="#33cc33" style="background-color:#33cc33;" title="Green"></div>
+                <div class="token-color-swatch" data-color="#ffcc00" style="background-color:#ffcc00;" title="Yellow"></div>
+                <div class="token-color-swatch" data-color="#ff8800" style="background-color:#ff8800;" title="Orange"></div>
+                <div class="token-color-swatch" data-color="#aa44ff" style="background-color:#aa44ff;" title="Purple"></div>
+            </div>
+        </div>
+    </div>
+    <div id="token-context-popup" style="display:none;">
+        <button id="player-token-delete-btn" title="Delete token">Delete</button>
+        <button id="player-token-color-btn" title="Change token color">Color</button>
+        <input type="color" id="player-token-color-input" class="token-popup-color-input">
+    </div>
     <div id="status">Connecting...</div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.2/socket.io.min.js"></script>
 
+    <script src="{{ url_for('static', filename='js/token-shared.js') }}"></script>
     <script src="{{ url_for('static', filename='js/player.js') }}"></script>
 
     </body>

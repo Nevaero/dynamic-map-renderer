@@ -382,6 +382,76 @@ header h1 {
     border-color: #fff;
 }
 
+/* Token Interaction Popup */
+#token-interaction-popup {
+    position: absolute;
+    display: none;
+    background-color: rgba(50, 50, 50, 0.9);
+    border: 1px solid #aaa;
+    border-radius: 5px;
+    padding: 5px;
+    z-index: 20;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+}
+#token-interaction-popup button {
+    background: none;
+    border: 1px solid #ccc;
+    color: #eee;
+    padding: 4px 8px;
+    margin: 2px;
+    cursor: pointer;
+    font-size: 0.8em;
+    min-width: 60px;
+    border-radius: 3px;
+}
+#token-interaction-popup button:hover {
+    background-color: #555;
+    border-color: #fff;
+}
+
+/* Color input anchored inside token popup — invisible but positioned so the
+   browser's native color picker dialog opens near the popup, not at (0,0). */
+.token-popup-color-input {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+/* Player Token Context Popup */
+#token-context-popup {
+    position: fixed;
+    display: none;
+    background-color: rgba(50, 50, 50, 0.9);
+    border: 1px solid #aaa;
+    border-radius: 5px;
+    padding: 5px;
+    z-index: 100;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+}
+#token-context-popup button {
+    background: none;
+    border: 1px solid #ccc;
+    color: #eee;
+    padding: 4px 8px;
+    margin: 2px;
+    cursor: pointer;
+    font-size: 0.8em;
+    min-width: 60px;
+    border-radius: 3px;
+}
+#token-context-popup button:hover {
+    background-color: #555;
+    border-color: #fff;
+}
+
 /* Fog Controls in sidebar */
 .fog-controls label { /* Style label for color display */
      display: inline-block !important; /* Override general label block style */
@@ -492,5 +562,143 @@ header h1 {
 }
 #qr-code-container canvas, #qr-code-container img {
     display: block;
+}
+
+/* --- Token Styles: GM SVG --- */
+.token-group {
+    cursor: grab;
+    pointer-events: auto;
+}
+.token-group:hover circle {
+    stroke: #00ffff;
+    stroke-width: 2;
+}
+.token-group text {
+    pointer-events: none;
+    user-select: none;
+    font-family: sans-serif;
+    font-weight: bold;
+    font-size: 14px;
+    text-anchor: middle;
+    dominant-baseline: central;
+}
+
+/* --- Token Color Presets (shared GM/Player) --- */
+.token-color-presets {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+.token-color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.token-color-swatch:hover {
+    border-color: #aaa;
+}
+.token-color-swatch.token-color-active {
+    border-color: #00ffff;
+    box-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
+}
+
+/* --- Token Styles: Player Overlay --- */
+#token-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 5;
+}
+.player-token {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+    cursor: grab;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: sans-serif;
+    font-weight: bold;
+    font-size: 13px;
+    user-select: none;
+    touch-action: none;
+    z-index: 6;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    box-sizing: border-box;
+}
+.player-token:hover {
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+    border-color: #fff;
+}
+
+/* --- Token Toolbar: Player --- */
+#token-toolbar {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background-color: rgba(30, 30, 30, 0.9);
+    border-radius: 8px;
+    padding: 8px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+#token-toolbar .token-settings-group {
+    display: none;
+    align-items: center;
+    gap: 6px;
+}
+#token-toolbar.expanded .token-settings-group {
+    display: flex;
+}
+#player-toggle-token {
+    background-color: #555;
+    color: #eee;
+    border: 1px solid #777;
+    border-radius: 4px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+#player-toggle-token:hover {
+    background-color: #666;
+}
+#player-toggle-token.active {
+    background-color: #007bff;
+    border-color: #0056b3;
+    color: #fff;
+}
+#player-token-label {
+    width: 32px;
+    padding: 4px;
+    text-align: center;
+    border-radius: 4px;
+    border: 1px solid #555;
+    background-color: #333;
+    color: #eee;
+    font-size: 0.9em;
+}
+#player-token-colors {
+    display: flex;
+    gap: 3px;
+}
+#player-token-colors .token-color-swatch {
+    width: 22px;
+    height: 22px;
 }
 
