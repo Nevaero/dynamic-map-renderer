@@ -41,6 +41,9 @@ let draggingPlayerTokenOffset = null;
 let selectedPlayerTokenId = null;
 let playerTokenDragOccurred = false;
 
+// --- Preview Mode ---
+const isPreviewMode = window.parent !== window;
+
 // --- DOM Elements ---
 const canvas = document.getElementById('player-canvas');
 const statusDiv = document.getElementById('status');
@@ -91,9 +94,15 @@ async function init() {
     // Event Listeners and Connection...
     window.addEventListener('resize', onWindowResize, false);
     setupPlayerTouchControls();
-    setupTokenToolbar();
-    setupTokenCanvasClick();
-    setupPlayerTokenPopup();
+    if (isPreviewMode) {
+        const toolbar = document.getElementById('token-toolbar');
+        if (toolbar) toolbar.style.display = 'none';
+        if (tokenOverlay) tokenOverlay.style.display = 'none';
+    } else {
+        setupTokenToolbar();
+        setupTokenCanvasClick();
+        setupPlayerTokenPopup();
+    }
     connectWebSocket();
     animate();
     console.log("Initialization sequence complete.");
@@ -139,7 +148,9 @@ function connectWebSocket() {
     console.log("--- connectWebSocket() called ---");
     if (typeof io === 'undefined') { console.error("WS Error: Socket.IO library not loaded!"); return; }
     console.log("Attempting WebSocket connection...");
-    try { socket = io(); console.log("Socket.IO object created:", socket); }
+    const ioOpts = {};
+    if (window.parent !== window) ioOpts.query = { preview: '1' };
+    try { socket = io(ioOpts); console.log("Socket.IO object created:", socket); }
     catch (error) { console.error("Error initializing Socket.IO connection:", error); return; }
     socket.on('connect', () => { console.log(`WebSocket connected: ${socket.id}`); displayStatus(`Connected.`); socket.emit('join_game'); });
     socket.on('disconnect', (reason) => { console.warn(`WebSocket disconnected: ${reason}`); displayStatus(`Disconnected.`); });
@@ -147,11 +158,13 @@ function connectWebSocket() {
     socket.on('state_update', handleStateUpdate);
     socket.on('map_image_data', handleMapImageData);
     socket.on('error', (data) => { console.error('Server WS Error:', data.message || data); displayStatus(`SERVER ERROR.`); });
-    TokenShared.onTokensUpdate(socket, (newTokens) => {
-        tokens = newTokens;
-        renderPlayerTokens();
-        console.log(`Tokens updated: ${tokens.length} token(s)`);
-    });
+    if (!isPreviewMode) {
+        TokenShared.onTokensUpdate(socket, (newTokens) => {
+            tokens = newTokens;
+            renderPlayerTokens();
+            console.log(`Tokens updated: ${tokens.length} token(s)`);
+        });
+    }
     console.log("WebSocket event handlers set up.");
 }
 
@@ -382,7 +395,7 @@ function animate() {
     requestAnimationFrame(animate); if (isRenderingPaused || !renderer || !scene || !camera) return;
     const elapsedTime = clock.getElapsedTime(); if (material?.uniforms?.time) { material.uniforms.time.value = elapsedTime; }
     try { renderer.render(scene, camera); } catch (e) { console.error("Render loop error:", e); displayStatus(`ERROR rendering.`); isRenderingPaused = true; }
-    renderPlayerTokens();
+    if (!isPreviewMode) renderPlayerTokens();
  }
 
 // --- Utility & Fallbacks ---

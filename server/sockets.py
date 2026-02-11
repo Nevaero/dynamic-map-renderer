@@ -26,7 +26,8 @@ def register_socket_handlers(sio):
     @sio.on('connect')
     def handle_connect():
         logging.info(f"Client connected: {request.sid}")
-        if session.get('is_gm'):
+        is_preview = request.args.get('preview') == '1'
+        if session.get('is_gm') and not is_preview:
             if state.gm_socket_sid is not None:
                 # Already have an active GM — reject this connection
                 logging.warning(f"Rejected duplicate GM connection: {request.sid} (active GM: {state.gm_socket_sid})")
@@ -106,21 +107,22 @@ def register_socket_handlers(sio):
                 logging.info(f"Regenerating map image (in memory) because map_changed={map_changed} or fog_changed={fog_changed}")
                 image_bytes = generate_player_map_bytes(updated_state)
 
-            updated_state['map_content_path'] = 'binary://' if image_bytes else current_authoritative_state.get('map_content_path')
+            # Players should never receive the raw file path — always use binary sentinel
+            # so they keep the fog-composited texture from the last map_image_data event.
+            has_map = bool(updated_state.get('original_map_path'))
+            updated_state['map_content_path'] = 'binary://' if has_map else None
             state.current_state = updated_state
             logging.debug("Authoritative state updated.")
 
             state_to_send = copy.deepcopy(updated_state)
             state_to_send.pop('original_map_path', None)
+            state_to_send['map_content_path'] = 'binary://' if has_map else None
             if image_bytes:
-                state_to_send['map_content_path'] = 'binary://'
                 logging.info(f"Broadcasting update with {len(image_bytes)} bytes binary image.")
             elif not regenerate_image:
-                state_to_send['map_content_path'] = current_authoritative_state.get('map_content_path')
                 logging.debug("Broadcasting metadata-only update.")
             else:
-                logging.warning("Broadcasting update with null map path (image generation failed).")
-                state_to_send['map_content_path'] = None
+                logging.warning("Image regeneration was needed but produced no bytes.")
             socketio_emit('state_update', state_to_send, room=config.ROOM_NAME)
             if image_bytes:
                 b64_data = base64.b64encode(image_bytes).decode('ascii')

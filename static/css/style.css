@@ -1148,3 +1148,106 @@ h3 {
     border-color: var(--term-red);
     text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
 }
+
+
+/* =====================================================================
+   PLAYER PREVIEW — Bottom-right iframe overlay
+   ===================================================================== */
+.player-preview-container {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    width: 320px;
+    height: 240px;
+    z-index: 15;
+    border: 1px solid var(--term-green-dim);
+    background-color: var(--bg-black);
+    box-shadow: var(--glow-green), 0 4px 16px rgba(0, 0, 0, 0.8);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.player-preview-header {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    flex-shrink: 0;
+    background-color: var(--bg-panel);
+    border-bottom: 1px solid var(--border-green);
+    padding: 0 6px;
+    position: relative;
+}
+.player-preview-title {
+    flex: 1;
+    font-family: var(--font-terminal);
+    font-size: 0.7em;
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-shadow: var(--glow-amber);
+    user-select: none;
+}
+.player-preview-close {
+    background: none;
+    border: none;
+    color: var(--term-green-dim);
+    font-size: 1.2em;
+    cursor: pointer;
+    line-height: 1;
+    font-family: var(--font-terminal);
+    padding: 0 2px;
+}
+.player-preview-close:hover {
+    color: var(--term-green);
+    text-shadow: var(--glow-green);
+}
+.player-preview-resize-handle {
+    width: 14px;
+    height: 14px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    cursor: nw-resize;
+    z-index: 2;
+}
+.player-preview-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 0;
+    height: 0;
+    border-top: 8px solid var(--term-green-dim);
+    border-right: 8px solid transparent;
+}
+.player-preview-resize-handle:hover::after {
+    border-top-color: var(--term-green);
+}
+.player-preview-iframe {
+    flex: 1;
+    width: 100%;
+    border: none;
+    background-color: #000;
+}
+.player-preview-toggle {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    z-index: 14;
+    padding: 6px 12px;
+    border: 1px solid var(--term-green-dim);
+    background-color: var(--bg-button);
+    color: var(--term-green);
+    font-family: var(--font-terminal);
+    font-size: 0.78em;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s ease;
+    box-shadow: var(--glow-green);
+}
+.player-preview-toggle:hover {
+    background-color: var(--bg-button-hover);
+    border-color: var(--term-green);
+    text-shadow: var(--glow-green);
+}

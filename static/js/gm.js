@@ -124,6 +124,13 @@ const tokenColorButton = document.getElementById('token-color-button');
 const tokenColorInput = document.getElementById('token-color-input');
 const tunnelStatusDisplay = document.getElementById('tunnel-status');
 
+// --- Player Preview ---
+const playerPreviewContainer = document.getElementById('player-preview-container');
+const playerPreviewToggle = document.getElementById('player-preview-toggle');
+const playerPreviewClose = document.getElementById('player-preview-close');
+const playerPreviewIframe = document.getElementById('player-preview-iframe');
+const playerPreviewResizeHandle = document.getElementById('player-preview-resize-handle');
+let playerPreviewLoaded = false;
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -706,6 +713,10 @@ function setupEventListeners() {
         saveCreateBtn.addEventListener('click', () => createNewSave(saveNameInput.value));
         saveNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') createNewSave(saveNameInput.value); });
     }
+    // Player preview
+    if (playerPreviewToggle) playerPreviewToggle.addEventListener('click', togglePlayerPreview);
+    if (playerPreviewClose) playerPreviewClose.addEventListener('click', togglePlayerPreview);
+    setupPlayerPreviewResize();
     console.log("Event listeners setup complete.");
 }
 
@@ -941,8 +952,67 @@ function setInteractionMode(mode) {
             break;
     }
 }
-// KeyDown Handler (Unchanged)
+// --- Player Preview ---
+function togglePlayerPreview() {
+    const isVisible = playerPreviewContainer.style.display !== 'none';
+    if (isVisible) {
+        playerPreviewContainer.style.display = 'none';
+        playerPreviewToggle.style.display = '';
+    } else {
+        if (!playerPreviewLoaded) {
+            playerPreviewIframe.src = '/player';
+            playerPreviewLoaded = true;
+        }
+        playerPreviewContainer.style.display = '';
+        playerPreviewToggle.style.display = 'none';
+    }
+}
+
+function setupPlayerPreviewResize() {
+    if (!playerPreviewResizeHandle || !playerPreviewContainer) return;
+    let resizing = false;
+    let startX, startY, startW, startH;
+
+    playerPreviewResizeHandle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizing = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startW = playerPreviewContainer.offsetWidth;
+        startH = playerPreviewContainer.offsetHeight;
+        playerPreviewIframe.style.pointerEvents = 'none';
+        document.body.style.cursor = 'nw-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!resizing) return;
+        const panel = document.querySelector('.map-view-panel');
+        const maxW = panel ? panel.offsetWidth * 0.8 : 600;
+        const maxH = panel ? panel.offsetHeight * 0.8 : 500;
+        const newW = Math.max(200, Math.min(maxW, startW - (e.clientX - startX)));
+        const newH = Math.max(150, Math.min(maxH, startH - (e.clientY - startY)));
+        playerPreviewContainer.style.width = newW + 'px';
+        playerPreviewContainer.style.height = newH + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!resizing) return;
+        resizing = false;
+        playerPreviewIframe.style.pointerEvents = '';
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+}
+
+// KeyDown Handler
 function handleKeyDown(event) {
+    const tag = event.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+        // Only handle Escape and Ctrl-combos inside form fields
+        if (event.key !== 'Escape' && !event.ctrlKey) return;
+    }
     switch (event.key) {
         case 'Escape':
             if (currentInteractionMode === 'editing_vertex') {
@@ -988,6 +1058,12 @@ function handleKeyDown(event) {
                 } else {
                     openSaveLoadModal();
                 }
+            }
+            break;
+        case 'p':
+        case 'P':
+            if (!event.ctrlKey && !event.altKey && !event.metaKey) {
+                togglePlayerPreview();
             }
             break;
     }
@@ -2359,32 +2435,28 @@ async function _saveConfigurationInternal() {
         console.log(" -> Save SKIPPED.");
         return;
     }
-    const expectedPath = `maps/${currentMapFilename}`;
-    if (currentState.map_content_path !== expectedPath) {
-        console.warn(`Adjusting map_content_path before save.`);
-        currentState.map_content_path = expectedPath;
-    }
-    if (currentState.map_image_path) delete currentState.map_image_path;
-    if (currentState.filter_params) {
-        for (const filterId in currentState.filter_params) {
-            const textParams = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize'];
-            textParams.forEach(p => {
-                if (currentState.filter_params[filterId]?.[p] !== undefined) delete currentState.filter_params[filterId][p];
-            });
+    // Build a save-safe copy — never mutate currentState directly
+    const saveData = JSON.parse(JSON.stringify(currentState));
+    saveData.map_content_path = `maps/${currentMapFilename}`;
+    delete saveData.map_image_path;
+    if (saveData.filter_params) {
+        const textParams = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize'];
+        for (const filterId in saveData.filter_params) {
+            if (typeof saveData.filter_params[filterId] === 'object') {
+                textParams.forEach(p => delete saveData.filter_params[filterId]?.[p]);
+            }
         }
     }
-    currentState.fog_of_war = currentState.fog_of_war || {
-        hidden_polygons: []
-    };
-    currentState.fog_of_war.hidden_polygons = currentState.fog_of_war.hidden_polygons || [];
-    console.log("Saving config:", JSON.stringify(currentState));
+    saveData.fog_of_war = saveData.fog_of_war || { hidden_polygons: [] };
+    saveData.fog_of_war.hidden_polygons = saveData.fog_of_war.hidden_polygons || [];
+    console.log("Saving config:", JSON.stringify(saveData));
     try {
         const r = await fetch(`/api/config/${encodeURIComponent(currentMapFilename)}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(currentState),
+            body: JSON.stringify(saveData),
         });
         if (!r.ok) {
             const errData = await r.json().catch(() => ({

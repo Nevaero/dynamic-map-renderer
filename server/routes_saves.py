@@ -294,13 +294,18 @@ def load_save(save_id):
     loaded_state['original_map_path'] = map_content_path
     loaded_state['display_type'] = 'image'
 
+    # Normalize map_content_path to binary sentinel so metadata-only broadcasts
+    # never expose the raw file path to players (which would bypass fog compositing).
+    has_map = bool(loaded_state.get('original_map_path'))
+    loaded_state['map_content_path'] = 'binary://' if has_map else None
+
     state.current_state = loaded_state
     state.current_tokens = copy.deepcopy(saved_tokens)
     state.current_save_id = save_id
     logging.info(f"Save loaded: {save_id} — map={map_filename}, tokens={len(state.current_tokens)}")
 
     image_bytes = None
-    if state.current_state.get('original_map_path'):
+    if has_map:
         image_bytes = generate_player_map_bytes(state.current_state)
 
     state_to_send = copy.deepcopy(state.current_state)
@@ -349,6 +354,9 @@ def _auto_load_latest_save():
         map_content_path = loaded_state.get('map_content_path', '')
         loaded_state['original_map_path'] = map_content_path
         loaded_state['display_type'] = 'image'
+        # Normalize to binary sentinel so metadata-only broadcasts never leak the raw path
+        has_map = bool(map_content_path)
+        loaded_state['map_content_path'] = 'binary://' if has_map else None
 
         state.current_state = loaded_state
         state.current_tokens = copy.deepcopy(saved_tokens)

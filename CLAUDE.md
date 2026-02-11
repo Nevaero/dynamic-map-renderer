@@ -1,4 +1,4 @@
-# Dynamic Map Renderer (v0.4.0)
+# Dynamic Map Renderer (v0.4.1)
 
 A web-based TTRPG tool that lets a Game Master transform static map images into dynamic, interactive displays for players in real-time. Built with a retro sci-fi aesthetic (Mothership, Traveller, Aliens RPG vibe).
 
@@ -35,6 +35,7 @@ A web-based TTRPG tool that lets a Game Master transform static map images into 
 - Single GM connection — only one GM socket at a time; duplicate connections are rejected
 - Protected write APIs — all mutating endpoints (`POST`, `PUT`, `DELETE`) require GM session
 - Protected socket events — `gm_update` is rejected from non-GM clients
+- Player preview iframe — live `/player` view embedded in the GM interface (bottom-right corner), toggled with `P` key or button, resizable via top-left drag handle; tokens are hidden in preview mode to avoid duplication with the GM SVG overlay
 - Builds to a single `.exe` for distribution (PyInstaller via `build.bat`)
 
 ## Directory Structure
@@ -71,12 +72,14 @@ A web-based TTRPG tool that lets a Game Master transform static map images into 
 - Navigating to `/` without a valid session shows a themed "Access Denied" page (`unauthorized.html`) and auto-redirects to `/player`.
 - All write endpoints (`POST /api/maps`, `POST /api/config/*`, save mutations) are protected with `@gm_required` (returns 403).
 - The `gm_update` socket event checks `session['is_gm']` and silently drops non-GM emitters.
-- Only one GM socket connection is allowed at a time; duplicate GM connects are immediately disconnected.
+- Only one GM socket connection is allowed at a time; duplicate GM connects are immediately disconnected (preview iframe excluded via `preview` query param).
 - Read-only endpoints (`GET /api/*`), the player view, and token socket events remain open.
 
 ## Data Flow
 
 GM Interface → WebSocket (SocketIO) → Flask Server (process + save config) → Broadcast to Players → Three.js renders with GLSL shader
+
+**Important invariant:** `state.current_state['map_content_path']` must always be `'binary://'` (never the raw file path) when a map is loaded. Players receive fog-composited images exclusively via the `map_image_data` binary event. Metadata-only broadcasts (filter/view changes) send `map_content_path = 'binary://'` so the player keeps its existing composited texture. The raw file path is stored in `original_map_path` (server-only, stripped before broadcast) and written to disk configs by `save_map_config`.
 
 ## Development
 
