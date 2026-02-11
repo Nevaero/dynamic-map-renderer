@@ -4,6 +4,7 @@
 import os
 import sys
 import logging
+import secrets
 import socket
 
 # --- PyInstaller / dev path detection ---
@@ -75,3 +76,6 @@ def get_lan_ip():
         return "127.0.0.1"
 
 LAN_IP = get_lan_ip()
+
+# --- GM Authentication ---
+GM_SECRET = secrets.token_urlsafe(24)

@@ -693,6 +693,9 @@ function onTokenPointerUp(e) {
         const finalY = e.clientY - (draggingPlayerTokenOffset ? draggingPlayerTokenOffset.y : 0);
         const normalized = screenToNormalizedCoords(finalX, finalY);
         if (normalized) {
+            // Optimistically update local position to avoid rollback flicker
+            const localToken = tokens.find(t => t.id === tokenId);
+            if (localToken) { localToken.x = normalized.x; localToken.y = normalized.y; }
             TokenShared.emitTokenMove(socket, tokenId, normalized.x, normalized.y);
         }
     } else {

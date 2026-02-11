@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACCESS DENIED</title>
+    <meta http-equiv="refresh" content="6;url=/player">
+    <style>
+        :root {
+            --term-red: #ff3333;
+            --term-amber: #ffb000;
+            --term-green: #33ff66;
+            --bg-black: #050505;
+            --font-terminal: 'Courier New', Courier, monospace;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: var(--font-terminal);
+            margin: 0; padding: 0;
+            background-color: var(--bg-black);
+            color: var(--term-red);
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        .container {
+            text-align: center;
+            max-width: 600px;
+            padding: 2rem;
+            border: 2px solid var(--term-red);
+            box-shadow: 0 0 20px rgba(255, 51, 51, 0.3), inset 0 0 20px rgba(255, 51, 51, 0.05);
+            animation: borderPulse 2s ease-in-out infinite;
+        }
+        @keyframes borderPulse {
+            0%, 100% { box-shadow: 0 0 20px rgba(255, 51, 51, 0.3), inset 0 0 20px rgba(255, 51, 51, 0.05); }
+            50% { box-shadow: 0 0 40px rgba(255, 51, 51, 0.5), inset 0 0 30px rgba(255, 51, 51, 0.1); }
+        }
+        .skull {
+            font-size: 4rem;
+            line-height: 1;
+            margin-bottom: 1rem;
+            animation: flicker 3s infinite;
+        }
+        @keyframes flicker {
+            0%, 95%, 100% { opacity: 1; }
+            96% { opacity: 0.4; }
+            97% { opacity: 1; }
+            98% { opacity: 0.2; }
+        }
+        h1 {
+            font-size: 1.8rem;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            margin: 0 0 0.5rem;
+            text-shadow: 0 0 10px rgba(255, 51, 51, 0.8);
+        }
+        .line {
+            color: var(--term-amber);
+            font-size: 0.85rem;
+            margin: 0.3rem 0;
+            opacity: 0.9;
+        }
+        .warning {
+            color: var(--term-red);
+            font-size: 1rem;
+            margin: 1.5rem 0 0.5rem;
+            font-weight: bold;
+            text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
+        }
+        .message {
+            color: var(--term-green);
+            font-size: 0.95rem;
+            margin: 1.5rem 0;
+            line-height: 1.6;
+        }
+        .redirect-info {
+            color: #888;
+            font-size: 0.75rem;
+            margin-top: 1.5rem;
+        }
+        .redirect-info span {
+            color: var(--term-amber);
+            font-weight: bold;
+        }
+        .btn {
+            display: inline-block;
+            margin-top: 1rem;
+            padding: 0.6rem 2rem;
+            font-family: var(--font-terminal);
+            font-size: 0.9rem;
+            color: var(--term-green);
+            background: transparent;
+            border: 1px solid var(--term-green);
+            cursor: pointer;
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: rgba(51, 255, 102, 0.1);
+            box-shadow: 0 0 12px rgba(51, 255, 102, 0.4);
+        }
+        /* scanline overlay */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.15) 2px,
+                rgba(0, 0, 0, 0.15) 4px
+            );
+            pointer-events: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="skull">&#9760;</div>
+        <h1>Access Denied</h1>
+        <div class="line">// UNAUTHORIZED TERMINAL ACCESS DETECTED</div>
+        <div class="line">// INCIDENT LOGGED &mdash; SECTOR 7-G</div>
+        <div class="warning">!! NICE TRY, CREW MEMBER !!</div>
+        <div class="message">
+            The GM console is classified.<br>
+            Your clearance level: <strong style="color: var(--term-red);">INSUFFICIENT</strong>.<br>
+            This attempt has been noted in your personnel file.
+        </div>
+        <a class="btn" href="/player">Return to Player View</a>
+        <div class="redirect-info">Auto-redirecting in <span id="countdown">5</span>s&hellip;</div>
+    </div>
+    <script>
+        let t = 5;
+        const el = document.getElementById('countdown');
+        const iv = setInterval(() => { t--; el.textContent = t; if (t <= 0) clearInterval(iv); }, 1000);
+    </script>
+</body>
+</html>

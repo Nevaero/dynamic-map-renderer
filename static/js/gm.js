@@ -156,11 +156,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (saveR.ok) {
                     const save = await saveR.json();
                     if (!currentSaveName) currentSaveName = save.name;
+                    const savedState = save.state || {};
                     if (save.map_filename && mapSelect) {
                         const opt = Array.from(mapSelect.options).find(o => o.value === save.map_filename);
                         if (opt) {
                             mapSelect.value = save.map_filename;
                             await handleMapSelectionChange({ target: mapSelect });
+                            // Restore save-specific state (handleMapSelectionChange loads
+                            // per-map config from disk, overwriting fog/view/filter)
+                            if (savedState.fog_of_war) currentState.fog_of_war = savedState.fog_of_war;
+                            if (savedState.view_state) currentState.view_state = savedState.view_state;
+                            if (savedState.current_filter !== undefined) currentState.current_filter = savedState.current_filter;
+                            if (savedState.filter_params) currentState.filter_params = savedState.filter_params;
+                            if (filterSelect && currentState.current_filter) filterSelect.value = currentState.current_filter;
+                            updateFilterControls();
+                            updateViewControls();
                         }
                     }
                 }
@@ -2679,6 +2689,16 @@ async function loadSave(id) {
         if (mapFilename) {
             await loadMapDataForGM(mapFilename);
         }
+        // Restore save-specific state (loadMapDataForGM overwrites currentState
+        // with the per-map config from disk — we need the save's fog/view/filter)
+        if (savedState.fog_of_war) currentState.fog_of_war = savedState.fog_of_war;
+        if (savedState.view_state) currentState.view_state = savedState.view_state;
+        if (savedState.current_filter !== undefined) currentState.current_filter = savedState.current_filter;
+        if (savedState.filter_params) currentState.filter_params = savedState.filter_params;
+        // Update UI controls to match restored state
+        if (filterSelect && currentState.current_filter) filterSelect.value = currentState.current_filter;
+        updateFilterControls();
+        updateViewControls();
         if (statusEl) statusEl.textContent = `Loaded: ${save.name}`;
         renderSavesInModal();
         closeSaveLoadModal();

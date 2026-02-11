@@ -4,3 +4,4 @@
 current_state = None      # dict or None
 current_tokens = []       # [token_dict, ...]
 current_save_id = None    # ID of the currently loaded save file
+gm_socket_sid = None      # SID of the active GM socket connection

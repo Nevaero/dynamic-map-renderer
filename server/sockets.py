@@ -10,8 +10,8 @@ import base64
 import logging
 from uuid import uuid4
 
-from flask import request
-from flask_socketio import emit as socketio_emit, join_room
+from flask import request, session
+from flask_socketio import emit as socketio_emit, join_room, disconnect
 from werkzeug.utils import secure_filename
 
 from server import config
@@ -24,11 +24,23 @@ def register_socket_handlers(sio):
     """Register all SocketIO event handlers on the given SocketIO instance."""
 
     @sio.on('connect')
-    def handle_connect(): logging.info(f"Client connected: {request.sid}")
+    def handle_connect():
+        logging.info(f"Client connected: {request.sid}")
+        if session.get('is_gm'):
+            if state.gm_socket_sid is not None:
+                # Already have an active GM — reject this connection
+                logging.warning(f"Rejected duplicate GM connection: {request.sid} (active GM: {state.gm_socket_sid})")
+                disconnect()
+                return
+            state.gm_socket_sid = request.sid
+            logging.info(f"GM socket registered: {request.sid}")
 
     @sio.on('disconnect')
     def handle_disconnect():
         logging.info(f"Client disconnected: {request.sid}")
+        if request.sid == state.gm_socket_sid:
+            state.gm_socket_sid = None
+            logging.info("GM socket cleared.")
 
     @sio.on('join_game')
     def handle_join_game(data=None):
@@ -57,6 +69,9 @@ def register_socket_handlers(sio):
     @sio.on('gm_update')
     def handle_gm_update(data):
         """Handles partial state updates received from the GM client."""
+        if not session.get('is_gm'):
+            logging.warning(f"Non-GM client {request.sid} tried to emit gm_update — rejected.")
+            return
         if not isinstance(data, dict) or 'update_data' not in data: logging.warning("Invalid GM update."); return
         update_delta = data['update_data']
         # Initialize state if needed

@@ -17,6 +17,7 @@ from server import config
 from server import state
 from server import helpers
 from server.map_gen import generate_player_map_bytes
+from server.auth import gm_required
 
 saves_bp = Blueprint('saves', __name__)
 
@@ -180,6 +181,7 @@ def list_saves():
 
 
 @saves_bp.route('/api/saves', methods=['POST'])
+@gm_required
 def create_save():
     """Create a new save from current state + tokens."""
     if not request.is_json:
@@ -228,6 +230,7 @@ def get_save(save_id):
 
 
 @saves_bp.route('/api/saves/<save_id>', methods=['PUT'])
+@gm_required
 def update_save(save_id):
     """Update save: rename via {name}, or overwrite state via {state, tokens}."""
     if not request.is_json:
@@ -258,6 +261,7 @@ def update_save(save_id):
 
 
 @saves_bp.route('/api/saves/<save_id>', methods=['DELETE'])
+@gm_required
 def delete_save(save_id):
     """Delete a save."""
     if not _delete_save(save_id):
@@ -269,6 +273,7 @@ def delete_save(save_id):
 
 
 @saves_bp.route('/api/saves/<save_id>/load', methods=['POST'])
+@gm_required
 def load_save(save_id):
     """Load a save into current game state and broadcast to all players."""
     save_data = _read_save(save_id)

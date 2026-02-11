@@ -37,7 +37,8 @@ if __name__ == '__main__':
     print("------------------------------------------")
     print(f" Your LAN IP: {config.LAN_IP}")
     print("------------------------------------------")
-    print(f" GM View (this machine): http://127.0.0.1:5000/")
+    gm_url = f"http://127.0.0.1:5000/?token={config.GM_SECRET}"
+    print(f" GM View (this machine): {gm_url}")
     print(f" Player View (LAN):      http://{config.LAN_IP}:5000/player")
     print("------------------------------------------")
     if is_frozen:
@@ -58,7 +59,7 @@ if __name__ == '__main__':
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or is_frozen:
         def open_browser():
             time.sleep(1.5)
-            webbrowser.open("http://127.0.0.1:5000/")
+            webbrowser.open(gm_url)
         threading.Thread(target=open_browser, daemon=True).start()
 
     socketio.run(app, debug=not is_frozen, host='0.0.0.0', port=5000, use_reloader=not is_frozen)

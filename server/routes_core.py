@@ -5,19 +5,27 @@ import os
 import copy
 import logging
 
-from flask import Blueprint, request, jsonify, render_template, send_from_directory, send_file, make_response
+from flask import Blueprint, request, jsonify, render_template, send_from_directory, send_file, make_response, session, redirect, url_for
 from werkzeug.utils import secure_filename
 
 from server import config
 from server import filters
 from server import helpers
 from server import tunnel
+from server.auth import gm_required
 
 core_bp = Blueprint('core', __name__)
 
 
 @core_bp.route('/')
-def index(): return render_template('index.html')
+def index():
+    if session.get('is_gm'):
+        return render_template('index.html')
+    token = request.args.get('token')
+    if token and token == config.GM_SECRET:
+        session['is_gm'] = True
+        return redirect(url_for('core.index'))
+    return render_template('unauthorized.html'), 403
 
 
 @core_bp.route('/player')
@@ -106,6 +114,7 @@ def list_map_content():
 
 
 @core_bp.route('/api/maps', methods=['POST'])
+@gm_required
 def upload_map_content():
     if 'mapFile' not in request.files: return jsonify({"error": "No file part"}), 400
     file = request.files['mapFile'];
@@ -136,6 +145,7 @@ def get_config(map_filename):
 
 
 @core_bp.route('/api/config/<path:map_filename>', methods=['POST'])
+@gm_required
 def save_config_api(map_filename):
     secured_filename = secure_filename(map_filename); map_file_path = os.path.join(config.MAPS_FOLDER, secured_filename)
     if not helpers.allowed_map_file(secured_filename) or not os.path.exists(map_file_path): return jsonify({"error": "Map not found/invalid"}), 404
