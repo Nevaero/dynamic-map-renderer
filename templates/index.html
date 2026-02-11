@@ -102,15 +102,24 @@
             </div>
 
             <div class="session-info">
-                 <label for="session-id-input"><strong>Session ID:</strong></label>
-                 <input type="text" id="session-id-input" maxlength="50" value="" title="Editable session ID — players must use the same ID">
-                 <label for="lan-player-url-display"><strong>Player URL (share with players on your network):</strong></label>
-                <div style="display: flex; align-items: center;">
-                     <input type="text" id="lan-player-url-display" readonly value="Detecting LAN IP..." title="Share this URL with players on your local network">
-                     <button id="copy-lan-player-url" title="Copy LAN URL to clipboard">Copy</button>
-                     <button id="show-qr-code" title="Show QR code">QR</button>
-                </div>
-                <p id="lan-copy-status" style="font-size: 0.8em; margin-top: 3px; min-height: 1em;"></p>
+                 <input type="hidden" id="session-id-input" value="">
+                 <div class="session-info-group">
+                     <label><strong>Remote URL (internet):</strong></label>
+                     <div style="display: flex; align-items: center;">
+                         <input type="text" id="tunnel-player-url-display" readonly value="Connecting..." title="Share with remote players over the internet">
+                         <button id="copy-tunnel-player-url" title="Copy remote URL to clipboard">Copy</button>
+                         <button id="show-qr-code" title="Show QR code">QR</button>
+                     </div>
+                     <p id="tunnel-status" class="tunnel-connecting">[ TUNNEL: CONNECTING... ]</p>
+                 </div>
+                 <div class="session-info-group">
+                     <label><strong>Local URL (LAN):</strong></label>
+                     <div style="display: flex; align-items: center;">
+                         <input type="text" id="lan-player-url-display" readonly value="Detecting LAN IP..." title="Share with players on your local network">
+                         <button id="copy-lan-player-url" title="Copy LAN URL to clipboard">Copy</button>
+                     </div>
+                 </div>
+                 <p id="lan-copy-status" style="font-size: 0.8em; margin-top: 3px; min-height: 1em;"></p>
             </div>
         </aside>
 

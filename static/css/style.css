@@ -591,6 +591,9 @@ h3 {
     font-size: 0.82em;
     background-color: rgba(10, 20, 10, 0.4);
 }
+.session-info-group {
+    margin-bottom: 10px;
+}
 .session-info p {
     margin: 4px 0;
     color: var(--term-green-dim);
@@ -635,7 +638,7 @@ h3 {
     display: flex;
     align-items: center;
 }
-#copy-lan-player-url, #show-qr-code {
+#copy-lan-player-url, #copy-tunnel-player-url, #show-qr-code {
     padding: 4px 8px;
     font-family: var(--font-terminal);
     font-size: 0.78em;
@@ -650,7 +653,7 @@ h3 {
     letter-spacing: 1px;
     transition: all 0.15s ease;
 }
-#copy-lan-player-url:hover, #show-qr-code:hover {
+#copy-lan-player-url:hover, #copy-tunnel-player-url:hover, #show-qr-code:hover {
     background-color: var(--bg-button-hover);
     border-color: var(--term-green);
     text-shadow: var(--glow-green);
@@ -718,9 +721,9 @@ h3 {
 }
 #qr-code-container {
     display: inline-block;
-    padding: 12px;
-    background: #111;
-    border: 1px solid var(--border-green);
+    padding: 16px;
+    background: #ffffff;
+    border: none;
 }
 #qr-code-container canvas, #qr-code-container img {
     display: block;
@@ -888,4 +891,34 @@ h3 {
 #player-token-colors .token-color-swatch {
     width: 22px;
     height: 22px;
+}
+
+
+/* =====================================================================
+   TUNNEL STATUS
+   ===================================================================== */
+#tunnel-status {
+    font-family: var(--font-terminal);
+    font-size: 0.78em;
+    margin-top: 5px;
+    margin-bottom: 0;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.tunnel-connecting {
+    color: var(--term-amber);
+    text-shadow: var(--glow-amber);
+    animation: tunnel-blink 1.2s step-end infinite;
+}
+.tunnel-connected {
+    color: var(--term-green);
+    text-shadow: var(--glow-green);
+}
+.tunnel-error {
+    color: var(--term-red);
+    text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
+}
+@keyframes tunnel-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
 }

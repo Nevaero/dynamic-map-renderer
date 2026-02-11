@@ -7,10 +7,16 @@ import os
 block_cipher = None
 app_root = SPECPATH
 
+# Bundle cloudflared.exe if present (optional — tunnel support)
+_cloudflared_path = os.path.join(app_root, 'cloudflared.exe')
+_extra_binaries = []
+if os.path.isfile(_cloudflared_path):
+    _extra_binaries.append((_cloudflared_path, '.'))
+
 a = Analysis(
     [os.path.join(app_root, 'app.py')],
     pathex=[app_root],
-    binaries=[],
+    binaries=_extra_binaries,
     datas=[
         # Read-only assets bundled inside the exe
         (os.path.join(app_root, 'templates'), 'templates'),

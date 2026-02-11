@@ -14,7 +14,7 @@ if errorlevel 1 (
 )
 
 :: Install / upgrade build dependencies
-echo [1/3] Installing dependencies...
+echo [1/4] Installing dependencies...
 pip install --upgrade pyinstaller flask flask-socketio pillow python-engineio python-socketio werkzeug
 if errorlevel 1 (
     echo ERROR: pip install failed.
@@ -23,8 +23,25 @@ if errorlevel 1 (
 )
 echo.
 
+:: Download cloudflared if not present
+echo [2/4] Checking for cloudflared...
+if exist cloudflared.exe (
+    echo cloudflared.exe already present, skipping download.
+) else (
+    echo Downloading cloudflared.exe from GitHub...
+    curl -L -o cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+    if errorlevel 1 (
+        echo WARNING: Could not download cloudflared.exe. Tunnel support will be unavailable.
+        echo Build will continue without tunnel support.
+        if exist cloudflared.exe del cloudflared.exe
+    ) else (
+        echo cloudflared.exe downloaded successfully.
+    )
+)
+echo.
+
 :: Build the exe
-echo [2/3] Building executable with PyInstaller...
+echo [3/4] Building executable with PyInstaller...
 pyinstaller --clean --noconfirm DynamicMapRenderer.spec
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
@@ -34,7 +51,7 @@ if errorlevel 1 (
 echo.
 
 :: Done
-echo [3/3] Build complete!
+echo [4/4] Build complete!
 echo.
 echo ============================================
 echo   Output:  dist\DynamicMapRenderer.exe

@@ -11,6 +11,7 @@ function generateSessionId() {
 let currentSessionId = generateSessionId();
 let lanIp = null;
 let lanPort = 5000;
+let tunnelUrl = null;
 let availableFilters = {};
 let mapList = [];
 let currentState = {}; // Holds the full state including filters, view, fog
@@ -93,7 +94,9 @@ const mapFileInput = document.getElementById('map-file-input');
 const uploadStatus = document.getElementById('upload-status');
 const sessionIdInput = document.getElementById('session-id-input');
 const lanPlayerUrlDisplay = document.getElementById('lan-player-url-display');
+const tunnelPlayerUrlDisplay = document.getElementById('tunnel-player-url-display');
 const copyLanPlayerUrlButton = document.getElementById('copy-lan-player-url');
+const copyTunnelPlayerUrlButton = document.getElementById('copy-tunnel-player-url');
 const lanCopyStatusDisplay = document.getElementById('lan-copy-status');
 const showQrCodeButton = document.getElementById('show-qr-code');
 const qrModal = document.getElementById('qr-modal');
@@ -120,6 +123,7 @@ const tokenInteractionPopup = document.getElementById('token-interaction-popup')
 const tokenDeleteButton = document.getElementById('token-delete-button');
 const tokenColorButton = document.getElementById('token-color-button');
 const tokenColorInput = document.getElementById('token-color-input');
+const tunnelStatusDisplay = document.getElementById('tunnel-status');
 
 
 // --- Initialization ---
@@ -154,6 +158,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log("Setting up UI, WebSocket, Listeners...");
         if (sessionIdInput) sessionIdInput.value = currentSessionId;
         fetchLanInfo(); // Fetch and display LAN player URL
+        startTunnelPolling(); // Poll for Cloudflare tunnel URL
         connectWebSocket();
         setupEventListeners();
         // resetUI(); // resetUI is now called conditionally above or within loadMapDataForGM
@@ -619,8 +624,8 @@ function setupEventListeners() {
     else console.error("viewYInput missing!");
     if (viewScaleInput) viewScaleInput.addEventListener('input', handleViewChange);
     else console.error("viewScaleInput missing!");
-    if (sessionIdInput) sessionIdInput.addEventListener('change', handleSessionIdChange);
-    if (copyLanPlayerUrlButton) copyLanPlayerUrlButton.addEventListener('click', copyLanPlayerUrlToClipboard);
+    if (copyLanPlayerUrlButton) copyLanPlayerUrlButton.addEventListener('click', () => copyUrlToClipboard(lanPlayerUrlDisplay));
+    if (copyTunnelPlayerUrlButton) copyTunnelPlayerUrlButton.addEventListener('click', () => copyUrlToClipboard(tunnelPlayerUrlDisplay));
     if (showQrCodeButton) showQrCodeButton.addEventListener('click', openQrModal);
     if (qrModalClose) qrModalClose.addEventListener('click', closeQrModal);
     if (qrModal) qrModal.addEventListener('click', function(e) { if (e.target === qrModal) closeQrModal(); });
@@ -2353,8 +2358,13 @@ function debouncedAutoSave() {
 
 // --- Session/Player URL Display ---
 function updatePlayerUrl() {
-    if (!lanPlayerUrlDisplay || !lanIp) return;
-    lanPlayerUrlDisplay.value = `http://${lanIp}:${lanPort}/player?session=${encodeURIComponent(currentSessionId)}`;
+    const sessionParam = encodeURIComponent(currentSessionId);
+    if (lanPlayerUrlDisplay && lanIp) {
+        lanPlayerUrlDisplay.value = `http://${lanIp}:${lanPort}/player?session=${sessionParam}`;
+    }
+    if (tunnelPlayerUrlDisplay && tunnelUrl) {
+        tunnelPlayerUrlDisplay.value = `${tunnelUrl}/player?session=${sessionParam}`;
+    }
 }
 
 function fetchLanInfo() {
@@ -2373,29 +2383,65 @@ function fetchLanInfo() {
         });
 }
 
-function handleSessionIdChange() {
-    if (!sessionIdInput) return;
-    const newId = sessionIdInput.value.trim();
-    const validPattern = /^[a-zA-Z0-9_-]{1,50}$/;
-    if (!validPattern.test(newId)) {
-        sessionIdInput.value = currentSessionId; // revert
-        return;
-    }
-    const oldId = currentSessionId;
-    currentSessionId = newId;
-    if (socket && socket.connected) {
-        socket.emit('leave_session', { session_id: oldId });
-        socket.emit('join_session', { session_id: currentSessionId });
-    }
-    updatePlayerUrl();
+function startTunnelPolling() {
+    updateTunnelStatusDisplay('connecting');
+    let elapsed = 0;
+    const interval = 2000;
+    const timeout = 60000;
+    const poll = setInterval(() => {
+        elapsed += interval;
+        fetch('/api/tunnel-info')
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'connected' && data.url) {
+                    tunnelUrl = data.url;
+                    updatePlayerUrl();
+                    updateTunnelStatusDisplay('connected');
+                    clearInterval(poll);
+                    console.log("Tunnel connected:", tunnelUrl);
+                } else if (data.status === 'error') {
+                    updateTunnelStatusDisplay('error', data.error);
+                    clearInterval(poll);
+                    console.warn("Tunnel error:", data.error);
+                } else if (elapsed >= timeout) {
+                    updateTunnelStatusDisplay('error', 'Timed out');
+                    clearInterval(poll);
+                    console.warn("Tunnel polling timed out.");
+                }
+            })
+            .catch(() => {
+                if (elapsed >= timeout) {
+                    updateTunnelStatusDisplay('error', 'Unavailable');
+                    clearInterval(poll);
+                }
+            });
+    }, interval);
 }
 
-function copyLanPlayerUrlToClipboard() {
-    if (!lanPlayerUrlDisplay) return;
-    lanPlayerUrlDisplay.select();
-    lanPlayerUrlDisplay.setSelectionRange(0, 99999);
+function updateTunnelStatusDisplay(status, detail) {
+    if (!tunnelStatusDisplay) return;
+    tunnelStatusDisplay.className = '';
+    if (status === 'connecting') {
+        tunnelStatusDisplay.className = 'tunnel-connecting';
+        tunnelStatusDisplay.textContent = '[ TUNNEL: CONNECTING... ]';
+    } else if (status === 'connected') {
+        tunnelStatusDisplay.className = 'tunnel-connected';
+        tunnelStatusDisplay.textContent = '[ TUNNEL: ONLINE ]';
+    } else if (status === 'error') {
+        tunnelStatusDisplay.className = 'tunnel-error';
+        tunnelStatusDisplay.textContent = `[ TUNNEL: ${(detail || 'UNAVAILABLE').toUpperCase()} ]`;
+        if (tunnelPlayerUrlDisplay) tunnelPlayerUrlDisplay.value = 'Unavailable';
+    }
+}
+
+function copyUrlToClipboard(inputEl) {
+    if (!inputEl) return;
+    const text = inputEl.value;
+    if (!text || text === 'Unavailable' || text.startsWith('Detecting') || text.startsWith('Could not') || text.startsWith('Connecting')) return;
+    inputEl.select();
+    inputEl.setSelectionRange(0, 99999);
     if (navigator.clipboard) {
-        navigator.clipboard.writeText(lanPlayerUrlDisplay.value).then(() => {
+        navigator.clipboard.writeText(text).then(() => {
             if (lanCopyStatusDisplay) { lanCopyStatusDisplay.textContent = "Copied!"; setTimeout(() => { lanCopyStatusDisplay.textContent = ""; }, 2000); }
         }).catch(() => {
             document.execCommand('copy');
@@ -2408,9 +2454,11 @@ function copyLanPlayerUrlToClipboard() {
 }
 
 function openQrModal() {
-    if (!qrModal || !qrCodeContainer || !lanPlayerUrlDisplay) return;
-    const url = lanPlayerUrlDisplay.value;
-    if (!url || url.startsWith('Detecting') || url.startsWith('Could not')) return;
+    if (!qrModal || !qrCodeContainer) return;
+    // Prefer tunnel URL for QR code, fall back to LAN
+    const url = (tunnelUrl && tunnelPlayerUrlDisplay) ? tunnelPlayerUrlDisplay.value
+              : (lanPlayerUrlDisplay ? lanPlayerUrlDisplay.value : null);
+    if (!url || url === 'Unavailable' || url.startsWith('Detecting') || url.startsWith('Could not') || url.startsWith('Connecting')) return;
 
     // Clear previous QR code
     qrCodeContainer.innerHTML = '';

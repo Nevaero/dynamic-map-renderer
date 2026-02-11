@@ -14,6 +14,8 @@ import webbrowser
 import threading
 import socket
 import base64
+import atexit
+import subprocess
 from io import BytesIO
 from uuid import uuid4
 from PIL import Image, ImageDraw, UnidentifiedImageError
@@ -135,6 +137,87 @@ def get_lan_ip():
         return "127.0.0.1"
 
 LAN_IP = get_lan_ip()
+
+# --- Cloudflare Tunnel Management ---
+_tunnel_process = None
+_tunnel_url = None
+_tunnel_error = None
+_tunnel_lock = threading.Lock()
+
+def _find_cloudflared():
+    """Locate cloudflared binary: bundled (frozen) or project dir (dev)."""
+    if getattr(sys, 'frozen', False):
+        path = os.path.join(BUNDLE_DIR, 'cloudflared.exe')
+    else:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cloudflared.exe')
+    if os.path.isfile(path):
+        return path
+    return None
+
+def _start_tunnel():
+    """Start cloudflared quick-tunnel in a background thread."""
+    global _tunnel_process, _tunnel_url, _tunnel_error
+    cloudflared_path = _find_cloudflared()
+    if not cloudflared_path:
+        with _tunnel_lock:
+            _tunnel_error = "cloudflared not found"
+        logging.info("Cloudflared binary not found — tunnel unavailable.")
+        return
+
+    logging.info(f"Starting cloudflared tunnel from: {cloudflared_path}")
+    try:
+        creation_flags = 0
+        if sys.platform == 'win32':
+            creation_flags = subprocess.CREATE_NO_WINDOW
+        proc = subprocess.Popen(
+            [cloudflared_path, 'tunnel', '--url', 'http://localhost:5000'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=creation_flags,
+        )
+        with _tunnel_lock:
+            _tunnel_process = proc
+        # cloudflared prints the URL to stderr
+        url_pattern = re.compile(r'(https://[a-zA-Z0-9-]+\.trycloudflare\.com)')
+        for line in proc.stderr:
+            try:
+                decoded = line.decode('utf-8', errors='replace').strip()
+            except Exception:
+                continue
+            if decoded:
+                logging.debug(f"[cloudflared] {decoded}")
+            match = url_pattern.search(decoded)
+            if match:
+                with _tunnel_lock:
+                    _tunnel_url = match.group(1)
+                logging.info(f"Cloudflare tunnel URL: {_tunnel_url}")
+                break
+        # Keep reading stderr to prevent pipe buffer from blocking
+        for line in proc.stderr:
+            pass
+    except Exception as e:
+        logging.error(f"Cloudflared tunnel error: {e}", exc_info=True)
+        with _tunnel_lock:
+            _tunnel_error = str(e)
+
+def _stop_tunnel():
+    """Terminate cloudflared subprocess on exit."""
+    global _tunnel_process
+    with _tunnel_lock:
+        proc = _tunnel_process
+        _tunnel_process = None
+    if proc and proc.poll() is None:
+        logging.info("Stopping cloudflared tunnel...")
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+atexit.register(_stop_tunnel)
 
 # --- In-Memory State Storage ---
 session_states = {}
@@ -450,6 +533,17 @@ def get_filters():
 @app.route('/api/lan-info', methods=['GET'])
 def get_lan_info():
     return jsonify({"ip": LAN_IP, "port": 5000})
+@app.route('/api/tunnel-info', methods=['GET'])
+def get_tunnel_info():
+    with _tunnel_lock:
+        url = _tunnel_url
+        error = _tunnel_error
+    if url:
+        return jsonify({"status": "connected", "url": url})
+    elif error:
+        return jsonify({"status": "error", "error": error})
+    else:
+        return jsonify({"status": "connecting"})
 @app.route('/api/maps', methods=['GET'])
 def list_map_content():
     try:
@@ -727,6 +821,14 @@ if __name__ == '__main__':
     if is_frozen:
         print(" (Close this window to stop the server)")
         print("------------------------------------------")
+
+    # Start cloudflared tunnel in background
+    if _find_cloudflared():
+        print(" Starting Cloudflare tunnel...")
+        threading.Thread(target=_start_tunnel, daemon=True).start()
+    else:
+        print(" Cloudflare tunnel: unavailable (cloudflared.exe not found)")
+    print("------------------------------------------")
 
     # Auto-open browser after a short delay to let the server start
     def open_browser():
