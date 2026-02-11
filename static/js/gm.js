@@ -15,6 +15,8 @@ const DEFAULT_HELP_MAP = "Help.png"; // Define the default map filename
 // --- Save/Load State ---
 let currentSaveId = null;
 let currentSaveName = null;
+let _autoSaveTimer = null;
+let _autoSaveDirty = false;
 
 // --- Fog of War State ---
 let currentInteractionMode = 'idle';
@@ -194,6 +196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
+        startAutoSave();
         console.log("GM Initialization complete.");
     } catch (error) {
         console.error("Error during initialization:", error);
@@ -257,6 +260,7 @@ function connectWebSocket() {
     TokenShared.onTokensUpdate(socket, (newTokens) => {
         tokens = newTokens;
         renderAllTokens();
+        markDirty();
         console.log(`Tokens updated: ${tokens.length} token(s)`);
     });
     console.log("WebSocket event handlers set up.");
@@ -2395,26 +2399,11 @@ async function _saveConfigurationInternal() {
         console.error('Auto-save error:', e);
         alert(`Error auto-saving: ${e.message}`);
     }
-    // Also update current save file if one is loaded
-    if (currentSaveId) {
-        try {
-            const saveState = Object.assign({}, currentState);
-            delete saveState.original_map_path;
-            const saveR = await fetch(`/api/saves/${encodeURIComponent(currentSaveId)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ state: saveState, tokens: tokens }),
-            });
-            if (saveR.ok) console.log("Save file also updated.");
-            else console.warn("Save file update failed.");
-        } catch (e) {
-            console.warn('Save file update error:', e);
-        }
-    }
 }
 
 function debouncedAutoSave() {
     console.log("Debounced auto-save triggered...");
+    markDirty();
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
         console.log("Debounce timer expired, saving.");
@@ -2721,6 +2710,7 @@ async function quickSave() {
         if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.error || `HTTP ${r.status}`); }
         const save = await r.json();
         currentSaveName = save.name;
+        _autoSaveDirty = false;
         updateSaveDisplay();
         console.log(`Quick-saved to: ${save.name}`);
         // Brief flash feedback
@@ -2733,6 +2723,37 @@ async function quickSave() {
         console.error('Quick-save error:', e);
         alert(`Quick-save failed: ${e.message}`);
     }
+}
+
+function markDirty() { _autoSaveDirty = true; }
+
+async function _autoSave() {
+    if (!_autoSaveDirty || !currentSaveId) return;
+    try {
+        const saveState = Object.assign({}, currentState);
+        delete saveState.original_map_path;
+        const r = await fetch(`/api/saves/${encodeURIComponent(currentSaveId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: saveState, tokens: tokens }),
+        });
+        if (!r.ok) { console.warn('Auto-save failed:', r.status); return; }
+        const save = await r.json();
+        currentSaveName = save.name;
+        _autoSaveDirty = false;
+        updateSaveDisplay();
+        console.log(`Auto-saved: ${save.name}`);
+    } catch (e) { console.warn('Auto-save error:', e); }
+}
+
+function startAutoSave() {
+    if (_autoSaveTimer) return;
+    _autoSaveTimer = setInterval(_autoSave, 10000);
+    console.log('Auto-save started (every 10s)');
+}
+
+function stopAutoSave() {
+    if (_autoSaveTimer) { clearInterval(_autoSaveTimer); _autoSaveTimer = null; }
 }
 
 async function renameSave(id, name) {

@@ -155,13 +155,17 @@ header h1 {
     min-width: 220px;
     max-width: 33.33vw;
     flex-shrink: 0;
-    padding: 12px;
     background-color: var(--bg-panel);
     border-right: none;
-    overflow-y: auto;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
+}
+.controls-scroll {
+    flex: 1 1 0;
+    overflow-y: auto;
+    padding: 12px;
 }
 
 /* --- Resize handle between panels --- */
@@ -638,8 +642,8 @@ h3 {
    SESSION INFO — Bottom panel
    ===================================================================== */
 .session-info {
-    margin-top: auto;
-    padding: 10px;
+    flex-shrink: 0;
+    padding: 10px 12px;
     border-top: 1px solid var(--border-green);
     font-size: 0.82em;
     background-color: rgba(10, 20, 10, 0.4);
