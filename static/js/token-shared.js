@@ -28,36 +28,32 @@
 
     // --- Socket Emit Wrappers ---
 
-    function emitTokenPlace(socket, sessionId, label, color, x, y) {
+    function emitTokenPlace(socket, label, color, x, y) {
         if (!socket || !socket.connected) return;
         socket.emit('token_place', {
-            session_id: sessionId,
             token: { label: label, color: color, x: x, y: y }
         });
     }
 
-    function emitTokenMove(socket, sessionId, tokenId, x, y) {
+    function emitTokenMove(socket, tokenId, x, y) {
         if (!socket || !socket.connected) return;
         socket.emit('token_move', {
-            session_id: sessionId,
             token_id: tokenId,
             x: Math.max(0, Math.min(1, x)),
             y: Math.max(0, Math.min(1, y))
         });
     }
 
-    function emitTokenRemove(socket, sessionId, tokenId) {
+    function emitTokenRemove(socket, tokenId) {
         if (!socket || !socket.connected) return;
         socket.emit('token_remove', {
-            session_id: sessionId,
             token_id: tokenId
         });
     }
 
-    function emitTokenUpdateColor(socket, sessionId, tokenId, color) {
+    function emitTokenUpdateColor(socket, tokenId, color) {
         if (!socket || !socket.connected) return;
         socket.emit('token_update_color', {
-            session_id: sessionId,
             token_id: tokenId,
             color: color
         });
@@ -87,7 +83,6 @@
      *   colorBtnEl,      - the Color button element
      *   colorInputEl,    - the <input type="color"> element
      *   getSocket,       - () => socket
-     *   getSessionId,    - () => sessionId
      *   getSelectedId,   - () => selectedTokenId
      *   getTokens,       - () => tokens array
      *   onDismiss        - () => void, called when popup is dismissed
@@ -95,14 +90,14 @@
      */
     function setupTokenContextPopup(config) {
         const { popupEl, deleteBtnEl, colorBtnEl, colorInputEl,
-                getSocket, getSessionId, getSelectedId, getTokens, onDismiss } = config;
+                getSocket, getSelectedId, getTokens, onDismiss } = config;
         if (!popupEl) return;
 
         if (deleteBtnEl) {
             deleteBtnEl.addEventListener('click', () => {
                 const selectedId = getSelectedId();
                 if (selectedId) {
-                    emitTokenRemove(getSocket(), getSessionId(), selectedId);
+                    emitTokenRemove(getSocket(), selectedId);
                 }
                 onDismiss();
             });
@@ -118,7 +113,7 @@
             colorInputEl.addEventListener('input', () => {
                 const selectedId = getSelectedId();
                 if (selectedId) {
-                    emitTokenUpdateColor(getSocket(), getSessionId(), selectedId, colorInputEl.value);
+                    emitTokenUpdateColor(getSocket(), selectedId, colorInputEl.value);
                 }
             });
             colorInputEl.addEventListener('change', () => {

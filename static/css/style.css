@@ -152,21 +152,82 @@ header h1 {
    ===================================================================== */
 .controls-panel {
     width: 350px;
-    min-width: 300px;
+    min-width: 220px;
+    max-width: 33.33vw;
+    flex-shrink: 0;
     padding: 12px;
     background-color: var(--bg-panel);
-    border-right: 1px solid var(--border-green);
+    border-right: none;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
 }
 
-/* --- Control groups --- */
+/* --- Resize handle between panels --- */
+.panel-resize-handle {
+    width: 5px;
+    cursor: col-resize;
+    background-color: var(--border-green);
+    flex-shrink: 0;
+    position: relative;
+    transition: background-color 0.15s ease;
+}
+.panel-resize-handle:hover,
+.panel-resize-handle.dragging {
+    background-color: var(--term-green);
+    box-shadow: var(--glow-green);
+}
+
+/* --- Collapsible panels --- */
+.gm-panel {
+    margin-bottom: 2px;
+    border: 1px solid var(--border-green);
+    background-color: rgba(10, 20, 10, 0.5);
+}
+.gm-panel > summary {
+    padding: 7px 10px;
+    font-family: var(--font-terminal);
+    font-weight: normal;
+    font-size: 0.82em;
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-shadow: var(--glow-amber);
+    cursor: pointer;
+    user-select: none;
+    list-style: none;           /* hide default marker */
+    display: flex;
+    align-items: center;
+}
+.gm-panel > summary::-webkit-details-marker { display: none; }
+.gm-panel > summary::before {
+    content: '\25B6';           /* right-pointing triangle */
+    display: inline-block;
+    margin-right: 7px;
+    font-size: 0.7em;
+    transition: transform 0.15s ease;
+}
+.gm-panel[open] > summary::before {
+    transform: rotate(90deg);
+}
+.gm-panel > summary:hover {
+    color: var(--term-green);
+    text-shadow: var(--glow-green);
+}
+.gm-panel-body {
+    padding: 8px 10px 10px;
+    border-top: 1px solid var(--border-green);
+}
+
+/* --- Control groups (legacy class kept for any remaining uses) --- */
 .gm-controls {
     margin-bottom: 12px;
 }
-.gm-controls label {
+
+/* --- Shared label styles --- */
+.gm-controls label,
+.gm-panel-body label {
     display: block;
     margin-bottom: 4px;
     font-weight: normal;
@@ -177,10 +238,10 @@ header h1 {
 }
 
 /* --- Shared input / select / button styles --- */
-.gm-controls select,
-.gm-controls input[type="text"],
-.gm-controls input[type="number"],
-.gm-controls input[type="file"] {
+.gm-controls select,   .gm-panel-body select,
+.gm-controls input[type="text"],  .gm-panel-body input[type="text"],
+.gm-controls input[type="number"],.gm-panel-body input[type="number"],
+.gm-controls input[type="file"],  .gm-panel-body input[type="file"] {
     width: 100%;
     padding: 6px 8px;
     margin-bottom: 5px;
@@ -190,21 +251,23 @@ header h1 {
     font-family: var(--font-terminal);
     font-size: 0.85em;
 }
-.gm-controls select:focus,
-.gm-controls input[type="text"]:focus,
-.gm-controls input[type="number"]:focus {
+.gm-controls select:focus,   .gm-panel-body select:focus,
+.gm-controls input[type="text"]:focus,  .gm-panel-body input[type="text"]:focus,
+.gm-controls input[type="number"]:focus,.gm-panel-body input[type="number"]:focus {
     outline: none;
     border-color: var(--term-green);
     box-shadow: var(--glow-green);
 }
 
-.gm-controls select option {
+.gm-controls select option,
+.gm-panel-body select option {
     background-color: var(--bg-panel);
     color: var(--term-green);
 }
 
 /* --- Buttons --- */
-.gm-controls button {
+.gm-controls button,
+.gm-panel-body button {
     width: 100%;
     padding: 7px 10px;
     margin-bottom: 5px;
@@ -218,13 +281,15 @@ header h1 {
     letter-spacing: 1px;
     transition: all 0.15s ease;
 }
-.gm-controls button:hover {
+.gm-controls button:hover,
+.gm-panel-body button:hover {
     background-color: var(--bg-button-hover);
     border-color: var(--term-green);
     text-shadow: var(--glow-green);
     box-shadow: var(--glow-green);
 }
-.gm-controls button:disabled {
+.gm-controls button:disabled,
+.gm-panel-body button:disabled {
     background-color: var(--bg-black);
     border-color: #1a1a1a;
     color: #333;
@@ -234,7 +299,8 @@ header h1 {
 }
 
 /* --- Range sliders --- */
-.gm-controls input[type="range"] {
+.gm-controls input[type="range"],
+.gm-panel-body input[type="range"] {
     width: 100%;
     margin-top: 3px;
     margin-bottom: 5px;
@@ -242,19 +308,22 @@ header h1 {
 }
 
 /* --- Checkboxes --- */
-.gm-controls input[type="checkbox"] {
+.gm-controls input[type="checkbox"],
+.gm-panel-body input[type="checkbox"] {
     margin-right: 5px;
     vertical-align: middle;
     width: auto;
     accent-color: var(--term-green);
 }
-.gm-controls label:has(input[type="checkbox"]) {
+.gm-controls label:has(input[type="checkbox"]),
+.gm-panel-body label:has(input[type="checkbox"]) {
     display: inline-block;
     margin-bottom: 5px;
 }
 
 /* --- Slider value readout --- */
-.gm-controls label > span.slider-value {
+.gm-controls label > span.slider-value,
+.gm-panel-body label > span.slider-value {
     margin-left: 8px;
     font-family: var(--font-terminal);
     font-size: 0.85em;
@@ -263,25 +332,9 @@ header h1 {
     text-shadow: var(--glow-amber);
 }
 
-/* --- Fieldsets --- */
-.gm-controls fieldset {
-    border: 1px solid var(--border-green);
-    padding: 10px 12px;
-    margin-top: 8px;
-    background-color: rgba(10, 20, 10, 0.5);
-}
-.gm-controls legend {
-    font-weight: normal;
-    padding: 0 6px;
-    font-size: 0.9em;
-    color: var(--term-amber);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    text-shadow: var(--glow-amber);
-}
-
 /* Hint text in controls */
-.gm-controls p {
+.gm-controls p,
+.gm-panel-body p {
     color: var(--term-green-dim);
     font-size: 0.78em;
 }
@@ -634,17 +687,17 @@ h3 {
     border-color: var(--term-green);
     box-shadow: var(--glow-green);
 }
-.session-info div:has(input) {
+.session-info-buttons {
     display: flex;
     align-items: center;
+    margin-top: 4px;
+    gap: 5px;
 }
-#copy-lan-player-url, #copy-tunnel-player-url, #show-qr-code {
+.session-info-buttons button {
     padding: 4px 8px;
     font-family: var(--font-terminal);
     font-size: 0.78em;
-    margin-left: 5px;
     cursor: pointer;
-    vertical-align: middle;
     flex-shrink: 0;
     background-color: var(--bg-button);
     border: 1px solid var(--border-green);
@@ -653,13 +706,10 @@ h3 {
     letter-spacing: 1px;
     transition: all 0.15s ease;
 }
-#copy-lan-player-url:hover, #copy-tunnel-player-url:hover, #show-qr-code:hover {
+.session-info-buttons button:hover {
     background-color: var(--bg-button-hover);
     border-color: var(--term-green);
     text-shadow: var(--glow-green);
-}
-#show-qr-code {
-    font-weight: normal;
 }
 #lan-copy-status {
     font-size: 0.78em;
@@ -900,8 +950,7 @@ h3 {
 #tunnel-status {
     font-family: var(--font-terminal);
     font-size: 0.78em;
-    margin-top: 5px;
-    margin-bottom: 0;
+    margin-left: auto;
     letter-spacing: 1px;
     text-transform: uppercase;
 }
@@ -921,4 +970,177 @@ h3 {
 @keyframes tunnel-blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.3; }
+}
+
+
+/* =====================================================================
+   SAVE/LOAD MODAL
+   ===================================================================== */
+.save-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.save-modal-content {
+    background: var(--bg-panel);
+    color: var(--term-green);
+    border: 1px solid var(--term-green-dim);
+    padding: 24px;
+    position: relative;
+    max-width: 520px;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--glow-green-strong), 0 8px 32px rgba(0, 0, 0, 0.8);
+}
+.save-modal-content h3 {
+    margin: 0 0 16px 0;
+    font-family: var(--font-terminal);
+    font-size: 1em;
+    color: var(--term-amber);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: var(--glow-amber);
+    font-weight: normal;
+}
+.save-modal-close {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--term-green-dim);
+    font-size: 1.5em;
+    cursor: pointer;
+    line-height: 1;
+    font-family: var(--font-terminal);
+}
+.save-modal-close:hover {
+    color: var(--term-green);
+    text-shadow: var(--glow-green);
+}
+
+/* Create new save row */
+.save-modal-actions {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+.save-modal-actions input[type="text"] {
+    flex: 1;
+    padding: 6px 8px;
+    border: 1px solid var(--border-green);
+    background-color: var(--bg-input);
+    color: var(--term-green);
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
+}
+.save-modal-actions input[type="text"]:focus {
+    outline: none;
+    border-color: var(--term-green);
+    box-shadow: var(--glow-green);
+}
+.save-modal-actions button {
+    padding: 6px 12px;
+    border: 1px solid var(--term-green-dim);
+    background-color: var(--bg-button);
+    color: var(--term-green);
+    font-family: var(--font-terminal);
+    font-size: 0.85em;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+.save-modal-actions button:hover {
+    background-color: var(--bg-button-hover);
+    border-color: var(--term-green);
+    text-shadow: var(--glow-green);
+}
+
+/* Save list */
+.save-list {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 50vh;
+}
+
+/* Individual save entry */
+.save-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-green);
+    margin-bottom: 6px;
+    background-color: rgba(10, 20, 10, 0.5);
+}
+.save-entry-active {
+    border-color: var(--term-cyan);
+    box-shadow: 0 0 6px rgba(0, 255, 255, 0.2);
+}
+.save-entry-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.save-entry-name {
+    font-size: 0.9em;
+    color: var(--term-green);
+    font-weight: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.save-entry-active .save-entry-name {
+    color: var(--term-cyan);
+    text-shadow: 0 0 4px rgba(0, 255, 255, 0.3);
+}
+.save-entry-detail {
+    font-size: 0.72em;
+    color: var(--term-green-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.save-entry-buttons {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.save-entry-buttons button {
+    padding: 3px 8px;
+    border: 1px solid var(--border-green);
+    background-color: var(--bg-button);
+    color: var(--term-green);
+    font-family: var(--font-terminal);
+    font-size: 0.72em;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+.save-entry-buttons button:hover {
+    background-color: var(--bg-button-hover);
+    border-color: var(--term-green);
+    text-shadow: var(--glow-green);
+}
+.save-entry-buttons .save-btn-delete {
+    border-color: #5c1a1a;
+    color: var(--term-red);
+}
+.save-entry-buttons .save-btn-delete:hover {
+    background-color: #2a0808;
+    border-color: var(--term-red);
+    text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
 }

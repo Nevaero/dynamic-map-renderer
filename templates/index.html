@@ -15,24 +15,34 @@
 
     <div class="main-content">
         <aside class="controls-panel">
-            <div class="gm-controls">
-                <label for="map-select">Select Map:</label>
-                <select id="map-select">
-                    <option value="">-- Loading Maps --</option>
-                </select>
-            </div>
+            <details class="gm-panel" open>
+                <summary>Save / Load</summary>
+                <div class="gm-panel-body">
+                    <button id="open-save-modal-btn" type="button">Open Save Manager</button>
+                    <p id="current-save-display" style="margin-top:6px; font-size:0.85em; color:var(--term-green-dim);">No save loaded</p>
+                    <p style="font-size: 0.78em; color: var(--term-green-dim);">Ctrl+S to quick-save</p>
+                </div>
+            </details>
 
-            <div class="gm-controls">
-                 <form id="map-upload-form">
-                    <label for="map-file-input">Upload New Map Image:</label>
-                    <input type="file" id="map-file-input" name="mapFile" accept=".png,.jpg,.jpeg,.webp">
-                    <button type="submit">Upload</button>
-                    <p id="upload-status" style="font-size: 0.9em; margin-top: 5px; min-height: 1.2em;"></p>
-                 </form>
-            </div>
+            <details class="gm-panel" open>
+                <summary>Map</summary>
+                <div class="gm-panel-body">
+                    <label for="map-select">Select Map:</label>
+                    <select id="map-select">
+                        <option value="">-- Loading Maps --</option>
+                    </select>
+                    <form id="map-upload-form" style="margin-top: 8px;">
+                        <label for="map-file-input">Upload New Map Image:</label>
+                        <input type="file" id="map-file-input" name="mapFile" accept=".png,.jpg,.jpeg,.webp">
+                        <button type="submit">Upload</button>
+                        <p id="upload-status" style="font-size: 0.9em; margin-top: 5px; min-height: 1.2em;"></p>
+                    </form>
+                </div>
+            </details>
 
-             <div class="gm-controls fog-controls">
-                <fieldset> <legend>Masking / Fog of War</legend>
+            <details class="gm-panel" open>
+                <summary>Masking / Fog of War</summary>
+                <div class="gm-panel-body">
                     <button id="toggle-fog-drawing-button" disabled>Draw New Polygons</button>
                     <div id="shape-tools-container" class="shape-tools-container" style="display: none;">
                         <button class="shape-tool-btn shape-tool-active" data-shape="free">Free</button>
@@ -54,11 +64,12 @@
                         <div class="token-color-swatch" data-color="#ffffff" style="background-color:#ffffff;" title="White"></div>
                     </div>
                     <p style="font-size: 0.8em; margin-top: 5px;">Click map to draw, click near start to close. Drag polygons to move them. Click polygon to delete/recolour.</p>
-                </fieldset>
-            </div>
+                </div>
+            </details>
 
-            <div class="gm-controls token-controls">
-                <fieldset><legend>Player Tokens</legend>
+            <details class="gm-panel" open>
+                <summary>Player Tokens</summary>
+                <div class="gm-panel-body">
                     <button id="toggle-token-mode-button" disabled>Enable Token Mode</button>
                     <div id="token-settings" style="display:none;">
                         <label for="token-label-input" style="margin-top:6px;">Label (1-2 chars):</label>
@@ -76,53 +87,55 @@
                         </div>
                     </div>
                     <p style="font-size: 0.8em; margin-top: 5px; color: #555;">Click map to place. Drag to move. Right-click to remove.</p>
-                </fieldset>
-            </div>
+                </div>
+            </details>
 
-            <div class="gm-controls">
-                <fieldset> <legend>Player View Control</legend>
+            <details class="gm-panel" open>
+                <summary>Player View Control</summary>
+                <div class="gm-panel-body">
                     <label for="view-center-x">Center X:<span class="slider-value"></span></label>
                     <input type="range" id="view-center-x" min="0" max="1" step="0.01" value="0.5" disabled>
                     <label for="view-center-y">Center Y:<span class="slider-value"></span></label>
                     <input type="range" id="view-center-y" min="0" max="1" step="0.01" value="0.5" disabled>
                     <label for="view-scale">Scale (Zoom):<span class="slider-value"></span></label>
                     <input type="range" id="view-scale" min="0.1" max="5" step="0.05" value="1.0" disabled>
-                </fieldset>
-            </div>
-			</p>
-			<h3>Visual Filter Controls:</h3>
-			
-            <div class="gm-controls">
-                <label for="filter-select">Select Filter:</label>
-                <select id="filter-select">
-                    </select> </div>
+                </div>
+            </details>
 
-            <div id="filter-controls" class="gm-controls filter-controls">
-                 <p>Select map and filter first.</p>
-            </div>
+            <details class="gm-panel" open>
+                <summary>Visual Filter Controls</summary>
+                <div class="gm-panel-body">
+                    <label for="filter-select">Select Filter:</label>
+                    <select id="filter-select">
+                    </select>
+                    <div id="filter-controls" class="filter-controls">
+                        <p>Select map and filter first.</p>
+                    </div>
+                </div>
+            </details>
 
             <div class="session-info">
-                 <input type="hidden" id="session-id-input" value="">
                  <div class="session-info-group">
                      <label><strong>Remote URL (internet):</strong></label>
-                     <div style="display: flex; align-items: center;">
-                         <input type="text" id="tunnel-player-url-display" readonly value="Connecting..." title="Share with remote players over the internet">
+                     <input type="text" id="tunnel-player-url-display" readonly value="Connecting..." title="Share with remote players over the internet">
+                     <div class="session-info-buttons">
                          <button id="copy-tunnel-player-url" title="Copy remote URL to clipboard">Copy</button>
                          <button id="show-qr-code" title="Show QR code">QR</button>
+                         <span id="tunnel-status" class="tunnel-connecting">[ TUNNEL: CONNECTING... ]</span>
                      </div>
-                     <p id="tunnel-status" class="tunnel-connecting">[ TUNNEL: CONNECTING... ]</p>
                  </div>
                  <div class="session-info-group">
                      <label><strong>Local URL (LAN):</strong></label>
-                     <div style="display: flex; align-items: center;">
-                         <input type="text" id="lan-player-url-display" readonly value="Detecting LAN IP..." title="Share with players on your local network">
+                     <input type="text" id="lan-player-url-display" readonly value="Detecting LAN IP..." title="Share with players on your local network">
+                     <div class="session-info-buttons">
                          <button id="copy-lan-player-url" title="Copy LAN URL to clipboard">Copy</button>
+                         <button id="show-qr-code-lan" title="Show QR code for LAN">QR</button>
                      </div>
                  </div>
                  <p id="lan-copy-status" style="font-size: 0.8em; margin-top: 3px; min-height: 1em;"></p>
             </div>
         </aside>
-
+        <div class="panel-resize-handle" id="panel-resize-handle"></div>
         <main class="map-view-panel">
              <div id="gm-map-display" style="display: none;">
                  <img id="gm-map-image" src="" alt="Selected Map Preview" style="display: none;">
@@ -151,6 +164,52 @@
         </div>
     </div>
 
+    <div id="save-modal" class="save-modal-overlay" style="display:none;">
+        <div class="save-modal-content">
+            <button id="save-modal-close" class="save-modal-close">&times;</button>
+            <h3>Save Manager</h3>
+            <div class="save-modal-actions">
+                <input type="text" id="save-name-input" placeholder="New save name..." maxlength="64">
+                <button id="save-create-btn" type="button">Create</button>
+            </div>
+            <div id="save-list" class="save-list"></div>
+            <p id="save-modal-status" style="font-size:0.8em; margin-top:8px; min-height:1.2em; color:var(--term-amber);"></p>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const handle = document.getElementById('panel-resize-handle');
+        const panel = document.querySelector('.controls-panel');
+        if (!handle || !panel) return;
+        let dragging = false;
+        let startX, startW;
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            dragging = true;
+            startX = e.clientX;
+            startW = panel.offsetWidth;
+            handle.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            const maxW = window.innerWidth / 3;
+            const newW = Math.max(220, Math.min(maxW, startW + (e.clientX - startX)));
+            panel.style.width = newW + 'px';
+            window.dispatchEvent(new Event('resize'));
+        });
+        document.addEventListener('mouseup', function() {
+            if (!dragging) return;
+            dragging = false;
+            handle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.dispatchEvent(new Event('resize'));
+        });
+    })();
+    </script>
     <script src="{{ url_for('static', filename='js/token-shared.js') }}"></script>
     <script src="{{ url_for('static', filename='js/gm.js') }}"></script>
 </body>

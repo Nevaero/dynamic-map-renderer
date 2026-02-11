@@ -5,7 +5,6 @@
 // --- Global Variables ---
 let scene, camera, renderer, planeMesh, material;
 let socket = null;
-let currentSessionId = null;
 // *** Use ImageLoader instead of TextureLoader for blob loading ***
 let imageLoader = new THREE.ImageLoader();
 imageLoader.crossOrigin = 'anonymous'; // Set crossOrigin for ImageLoader
@@ -50,18 +49,9 @@ const tokenOverlay = document.getElementById('token-overlay');
 
 // --- Initialization ---
 async function init() {
-    console.log("Player View Initializing (v1.31 - Use ImageLoader)..."); // Version updated
-    // textureLoader.setPath('/'); // Not needed if using absolute URLs or ImageLoader
-    const urlParams = new URLSearchParams(window.location.search);
-    currentSessionId = urlParams.get('session');
-    if (!currentSessionId) {
-        const errorMsg = "ERROR: No session ID found in URL (?session=... is required)";
-        displayStatus(errorMsg); console.error(errorMsg);
-        document.body.innerHTML = `<p style="color:red; font-size: 1.2em; padding: 20px;">${errorMsg}</p>`;
-        return;
-     }
-    displayStatus(`Initializing Session: ${currentSessionId}...`);
-    console.log(`Player joining session: ${currentSessionId}`);
+    console.log("Player View Initializing (v2.0 - Save/Load)...");
+    displayStatus("Initializing...");
+    console.log("Player joining game room...");
     try { await loadAllFilterConfigs(); } catch (e) { console.error("Filter config load failed:", e); }
     // Scene, Camera, Renderer Setup... (condensed)
     scene = new THREE.Scene();
@@ -147,12 +137,11 @@ async function loadFilterShaders(filterId) {
 // --- WebSocket Handling (Unchanged, condensed) ---
 function connectWebSocket() {
     console.log("--- connectWebSocket() called ---");
-    if (!currentSessionId) { console.error("WS Error: No Session ID."); return; }
     if (typeof io === 'undefined') { console.error("WS Error: Socket.IO library not loaded!"); return; }
-    console.log(`Attempting WebSocket connection for session: ${currentSessionId}...`);
+    console.log("Attempting WebSocket connection...");
     try { socket = io(); console.log("Socket.IO object created:", socket); }
     catch (error) { console.error("Error initializing Socket.IO connection:", error); return; }
-    socket.on('connect', () => { console.log(`WebSocket connected: ${socket.id}`); displayStatus(`Connected.`); socket.emit('join_session', { session_id: currentSessionId }); });
+    socket.on('connect', () => { console.log(`WebSocket connected: ${socket.id}`); displayStatus(`Connected.`); socket.emit('join_game'); });
     socket.on('disconnect', (reason) => { console.warn(`WebSocket disconnected: ${reason}`); displayStatus(`Disconnected.`); });
     socket.on('connect_error', (error) => { console.error('WebSocket connection error:', error); displayStatus(`Connection Error.`); });
     socket.on('state_update', handleStateUpdate);
@@ -646,12 +635,12 @@ function setupTokenCanvasClick() {
     if (!canvas) return;
     canvas.addEventListener('click', (e) => {
         if (!isTokenPlacingActive) return;
-        if (!socket || !socket.connected || !currentSessionId) return;
+        if (!socket || !socket.connected) return;
         const normalized = screenToNormalizedCoords(e.clientX, e.clientY);
         if (!normalized) return;
         // Only place if within map bounds (roughly 0-1)
         if (normalized.x < 0 || normalized.x > 1 || normalized.y < 0 || normalized.y > 1) return;
-        TokenShared.emitTokenPlace(socket, currentSessionId, playerTokenLabel, playerTokenColor, normalized.x, normalized.y);
+        TokenShared.emitTokenPlace(socket, playerTokenLabel, playerTokenColor, normalized.x, normalized.y);
     });
 }
 
@@ -704,7 +693,7 @@ function onTokenPointerUp(e) {
         const finalY = e.clientY - (draggingPlayerTokenOffset ? draggingPlayerTokenOffset.y : 0);
         const normalized = screenToNormalizedCoords(finalX, finalY);
         if (normalized) {
-            TokenShared.emitTokenMove(socket, currentSessionId, tokenId, normalized.x, normalized.y);
+            TokenShared.emitTokenMove(socket, tokenId, normalized.x, normalized.y);
         }
     } else {
         // Simple click — open context popup
@@ -742,7 +731,6 @@ function setupPlayerTokenPopup() {
         colorBtnEl: document.getElementById('player-token-color-btn'),
         colorInputEl: document.getElementById('player-token-color-input'),
         getSocket: () => socket,
-        getSessionId: () => currentSessionId,
         getSelectedId: () => selectedPlayerTokenId,
         getTokens: () => tokens,
         onDismiss: () => hidePlayerTokenPopup()

@@ -1,14 +1,7 @@
 // static/js/gm.js
-// Version: 1.76 (Load Help.png on Startup)
+// Version: 1.77 (SQLite Saves + Auto-load)
 
 // --- Global Variables ---
-function generateSessionId() {
-    const chars = 'abcdefghjkmnpqrstuvwxyz23456789'; // no ambiguous chars
-    let id = '';
-    for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)];
-    return id;
-}
-let currentSessionId = generateSessionId();
 let lanIp = null;
 let lanPort = 5000;
 let tunnelUrl = null;
@@ -18,6 +11,10 @@ let currentState = {}; // Holds the full state including filters, view, fog
 let socket = null;
 let currentMapFilename = null;
 const DEFAULT_HELP_MAP = "Help.png"; // Define the default map filename
+
+// --- Save/Load State ---
+let currentSaveId = null;
+let currentSaveName = null;
 
 // --- Fog of War State ---
 let currentInteractionMode = 'idle';
@@ -92,13 +89,13 @@ const filterControlsContainer = document.getElementById('filter-controls');
 const mapUploadForm = document.getElementById('map-upload-form');
 const mapFileInput = document.getElementById('map-file-input');
 const uploadStatus = document.getElementById('upload-status');
-const sessionIdInput = document.getElementById('session-id-input');
 const lanPlayerUrlDisplay = document.getElementById('lan-player-url-display');
 const tunnelPlayerUrlDisplay = document.getElementById('tunnel-player-url-display');
 const copyLanPlayerUrlButton = document.getElementById('copy-lan-player-url');
 const copyTunnelPlayerUrlButton = document.getElementById('copy-tunnel-player-url');
 const lanCopyStatusDisplay = document.getElementById('lan-copy-status');
 const showQrCodeButton = document.getElementById('show-qr-code');
+const showQrCodeLanButton = document.getElementById('show-qr-code-lan');
 const qrModal = document.getElementById('qr-modal');
 const qrModalClose = document.getElementById('qr-modal-close');
 const qrCodeContainer = document.getElementById('qr-code-container');
@@ -128,8 +125,7 @@ const tunnelStatusDisplay = document.getElementById('tunnel-status');
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log("GM View Initializing (v1.76 - Load Help.png)..."); // Version updated
-    console.log(`GM controlling HARDCODED Session ID: ${currentSessionId}`);
+    console.log("GM View Initializing (v2.0 - Save/Load)...");
 
     if (!mapViewPanel) { console.error("Failed to get reference to .map-view-panel for popup positioning!"); }
     if (!svgOverlay) svgOverlay = document.getElementById('gm-svg-overlay');
@@ -141,27 +137,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         populateFilterList();
         await populateMapList(); // Populates mapList and mapSelect dropdown
 
-        // *** ADDED: Attempt to load default map ***
-        console.log(`Checking for default map: ${DEFAULT_HELP_MAP}`);
-        const helpMapOption = Array.from(mapSelect.options).find(opt => opt.value === DEFAULT_HELP_MAP);
-        if (helpMapOption) {
-            console.log(`Default map '${DEFAULT_HELP_MAP}' found. Auto-selecting.`);
-            mapSelect.value = DEFAULT_HELP_MAP;
-            // Trigger the same logic as if the user selected it
-            await handleMapSelectionChange({ target: mapSelect });
-        } else {
-            console.log(`Default map '${DEFAULT_HELP_MAP}' not found in map list.`);
-            resetUI(); // Ensure UI is in default state if help map isn't loaded
-        }
-        // *** END ADDED ***
-
         console.log("Setting up UI, WebSocket, Listeners...");
-        if (sessionIdInput) sessionIdInput.value = currentSessionId;
         fetchLanInfo(); // Fetch and display LAN player URL
         startTunnelPolling(); // Poll for Cloudflare tunnel URL
         connectWebSocket();
         setupEventListeners();
-        // resetUI(); // resetUI is now called conditionally above or within loadMapDataForGM
+
+        // Check if a save was auto-loaded on the server
+        let saveWasLoaded = false;
+        try {
+            const saveInfoR = await fetch('/api/saves/current');
+            const saveInfo = await saveInfoR.json();
+            if (saveInfo.current_save_id) {
+                currentSaveId = saveInfo.current_save_id;
+                currentSaveName = saveInfo.current_save_name || null;
+                // Set map selector to match the save's map
+                const saveR = await fetch(`/api/saves/${encodeURIComponent(currentSaveId)}`);
+                if (saveR.ok) {
+                    const save = await saveR.json();
+                    if (!currentSaveName) currentSaveName = save.name;
+                    if (save.map_filename && mapSelect) {
+                        const opt = Array.from(mapSelect.options).find(o => o.value === save.map_filename);
+                        if (opt) {
+                            mapSelect.value = save.map_filename;
+                            await handleMapSelectionChange({ target: mapSelect });
+                        }
+                    }
+                }
+                updateSaveDisplay();
+                saveWasLoaded = true;
+                console.log(`Auto-loaded save: ${currentSaveId} (${currentSaveName})`);
+            }
+        } catch (e) { console.warn('Could not fetch current save info:', e); }
+
+        // Only auto-select Help.png if no save was loaded
+        if (!saveWasLoaded) {
+            console.log(`Checking for default map: ${DEFAULT_HELP_MAP}`);
+            const helpMapOption = Array.from(mapSelect.options).find(opt => opt.value === DEFAULT_HELP_MAP);
+            if (helpMapOption) {
+                console.log(`Default map '${DEFAULT_HELP_MAP}' found. Auto-selecting.`);
+                mapSelect.value = DEFAULT_HELP_MAP;
+                await handleMapSelectionChange({ target: mapSelect });
+            } else {
+                console.log(`Default map '${DEFAULT_HELP_MAP}' not found in map list.`);
+                resetUI();
+            }
+        }
 
         console.log("GM Initialization complete.");
     } catch (error) {
@@ -211,8 +232,8 @@ function connectWebSocket() {
     console.log("Setting up Socket.IO event handlers...");
     socket.on('connect', () => {
         console.log(`WebSocket connected: ${socket.id}`);
-        // Join the session room so we receive token broadcasts
-        socket.emit('join_session', { session_id: currentSessionId });
+        // Join the single game room
+        socket.emit('join_game');
     });
     socket.on('disconnect', (reason) => {
         console.warn(`WebSocket disconnected: ${reason}`);
@@ -626,7 +647,8 @@ function setupEventListeners() {
     else console.error("viewScaleInput missing!");
     if (copyLanPlayerUrlButton) copyLanPlayerUrlButton.addEventListener('click', () => copyUrlToClipboard(lanPlayerUrlDisplay));
     if (copyTunnelPlayerUrlButton) copyTunnelPlayerUrlButton.addEventListener('click', () => copyUrlToClipboard(tunnelPlayerUrlDisplay));
-    if (showQrCodeButton) showQrCodeButton.addEventListener('click', openQrModal);
+    if (showQrCodeButton) showQrCodeButton.addEventListener('click', () => openQrModal('tunnel'));
+    if (showQrCodeLanButton) showQrCodeLanButton.addEventListener('click', () => openQrModal('lan'));
     if (qrModalClose) qrModalClose.addEventListener('click', closeQrModal);
     if (qrModal) qrModal.addEventListener('click', function(e) { if (e.target === qrModal) closeQrModal(); });
     if (toggleFogDrawingButton) toggleFogDrawingButton.addEventListener('click', handleToggleFogDrawing);
@@ -657,6 +679,19 @@ function setupEventListeners() {
         if (e.target.closest('.token-group')) e.preventDefault();
     });
     setupTokenContextPopupGM();
+    // Save/Load modal
+    const openSaveModalBtn = document.getElementById('open-save-modal-btn');
+    if (openSaveModalBtn) openSaveModalBtn.addEventListener('click', openSaveLoadModal);
+    const saveModalClose = document.getElementById('save-modal-close');
+    if (saveModalClose) saveModalClose.addEventListener('click', closeSaveLoadModal);
+    const saveModal = document.getElementById('save-modal');
+    if (saveModal) saveModal.addEventListener('click', function(e) { if (e.target === saveModal) closeSaveLoadModal(); });
+    const saveCreateBtn = document.getElementById('save-create-btn');
+    const saveNameInput = document.getElementById('save-name-input');
+    if (saveCreateBtn && saveNameInput) {
+        saveCreateBtn.addEventListener('click', () => createNewSave(saveNameInput.value));
+        saveNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') createNewSave(saveNameInput.value); });
+    }
     console.log("Event listeners setup complete.");
 }
 
@@ -930,6 +965,17 @@ function handleKeyDown(event) {
                 fogRedo();
             }
             break;
+        case 's':
+        case 'S':
+            if (event.ctrlKey) {
+                event.preventDefault();
+                if (currentSaveId) {
+                    quickSave();
+                } else {
+                    openSaveLoadModal();
+                }
+            }
+            break;
     }
 }
 // Cancel Polygon Drawing (Unchanged)
@@ -957,8 +1003,8 @@ function handleSvgClick(event) {
         if (!svgPoint) { console.warn("Token place: getSvgCoordinates returned null"); return; }
         const relPoint = svgToRelativeCoords(svgPoint);
         if (!relPoint) { console.warn("Token place: svgToRelativeCoords returned null"); return; }
-        console.log(`Placing token '${currentTokenLabel}' at (${relPoint.x.toFixed(3)}, ${relPoint.y.toFixed(3)}) in session ${currentSessionId}`);
-        TokenShared.emitTokenPlace(socket, currentSessionId, currentTokenLabel, currentTokenColor, relPoint.x, relPoint.y);
+        console.log(`Placing token '${currentTokenLabel}' at (${relPoint.x.toFixed(3)}, ${relPoint.y.toFixed(3)})`);
+        TokenShared.emitTokenPlace(socket, currentTokenLabel, currentTokenColor, relPoint.x, relPoint.y);
         return;
     }
 
@@ -2279,17 +2325,11 @@ function fogRedo() {
 // --- State Updates & Saving (Unchanged) ---
 function sendUpdate(updateData) {
     console.log("Sending update:", JSON.stringify(updateData));
-    const validIdRegex = /^[a-zA-Z0-9_-]{1,50}$/;
-    if (!currentSessionId || !validIdRegex.test(currentSessionId)) {
-        console.error("Invalid session ID.");
-        return;
-    }
     if (!socket || !socket.connected) {
         console.warn("WS disconnected.");
         return;
     }
     const payload = {
-        session_id: currentSessionId,
         update_data: updateData
     };
     try {
@@ -2345,6 +2385,22 @@ async function _saveConfigurationInternal() {
         console.error('Auto-save error:', e);
         alert(`Error auto-saving: ${e.message}`);
     }
+    // Also update current save file if one is loaded
+    if (currentSaveId) {
+        try {
+            const saveState = Object.assign({}, currentState);
+            delete saveState.original_map_path;
+            const saveR = await fetch(`/api/saves/${encodeURIComponent(currentSaveId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: saveState, tokens: tokens }),
+            });
+            if (saveR.ok) console.log("Save file also updated.");
+            else console.warn("Save file update failed.");
+        } catch (e) {
+            console.warn('Save file update error:', e);
+        }
+    }
 }
 
 function debouncedAutoSave() {
@@ -2358,12 +2414,11 @@ function debouncedAutoSave() {
 
 // --- Session/Player URL Display ---
 function updatePlayerUrl() {
-    const sessionParam = encodeURIComponent(currentSessionId);
     if (lanPlayerUrlDisplay && lanIp) {
-        lanPlayerUrlDisplay.value = `http://${lanIp}:${lanPort}/player?session=${sessionParam}`;
+        lanPlayerUrlDisplay.value = `http://${lanIp}:${lanPort}/player`;
     }
     if (tunnelPlayerUrlDisplay && tunnelUrl) {
-        tunnelPlayerUrlDisplay.value = `${tunnelUrl}/player?session=${sessionParam}`;
+        tunnelPlayerUrlDisplay.value = `${tunnelUrl}/player`;
     }
 }
 
@@ -2453,11 +2508,16 @@ function copyUrlToClipboard(inputEl) {
     }
 }
 
-function openQrModal() {
+function openQrModal(source) {
     if (!qrModal || !qrCodeContainer) return;
-    // Prefer tunnel URL for QR code, fall back to LAN
-    const url = (tunnelUrl && tunnelPlayerUrlDisplay) ? tunnelPlayerUrlDisplay.value
+    let url;
+    if (source === 'lan') {
+        url = lanPlayerUrlDisplay ? lanPlayerUrlDisplay.value : null;
+    } else {
+        // Prefer tunnel URL, fall back to LAN
+        url = (tunnelUrl && tunnelPlayerUrlDisplay) ? tunnelPlayerUrlDisplay.value
               : (lanPlayerUrlDisplay ? lanPlayerUrlDisplay.value : null);
+    }
     if (!url || url === 'Unavailable' || url.startsWith('Detecting') || url.startsWith('Could not') || url.startsWith('Connecting')) return;
 
     // Clear previous QR code
@@ -2479,6 +2539,226 @@ function openQrModal() {
 
 function closeQrModal() {
     if (qrModal) qrModal.style.display = 'none';
+}
+
+// --- Save/Load System ---
+
+function openSaveLoadModal() {
+    const modal = document.getElementById('save-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    renderSavesInModal();
+}
+
+function closeSaveLoadModal() {
+    const modal = document.getElementById('save-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function renderSavesInModal() {
+    const listEl = document.getElementById('save-list');
+    const statusEl = document.getElementById('save-modal-status');
+    if (!listEl) return;
+    listEl.innerHTML = '<p style="color: var(--term-green-dim);">Loading saves...</p>';
+    try {
+        const r = await fetch('/api/saves');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const saves = await r.json();
+        listEl.innerHTML = '';
+        if (saves.length === 0) {
+            listEl.innerHTML = '<p style="color: var(--term-green-dim);">No saves found. Create one above.</p>';
+            return;
+        }
+        saves.forEach(save => {
+            const entry = document.createElement('div');
+            entry.className = 'save-entry' + (save.id === currentSaveId ? ' save-entry-active' : '');
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'save-entry-info';
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'save-entry-name';
+            nameSpan.textContent = save.name;
+            const detailSpan = document.createElement('span');
+            detailSpan.className = 'save-entry-detail';
+            const dateStr = save.modified_at ? new Date(save.modified_at).toLocaleString() : '—';
+            detailSpan.textContent = `${save.map_filename || 'No map'} — ${dateStr}`;
+            infoDiv.appendChild(nameSpan);
+            infoDiv.appendChild(detailSpan);
+            entry.appendChild(infoDiv);
+
+            const btnsDiv = document.createElement('div');
+            btnsDiv.className = 'save-entry-buttons';
+
+            const loadBtn = document.createElement('button');
+            loadBtn.textContent = 'Load';
+            loadBtn.addEventListener('click', () => loadSave(save.id));
+            btnsDiv.appendChild(loadBtn);
+
+            if (save.id === currentSaveId) {
+                const saveBtn = document.createElement('button');
+                saveBtn.textContent = 'Save';
+                saveBtn.addEventListener('click', () => quickSave());
+                btnsDiv.appendChild(saveBtn);
+            }
+
+            const renameBtn = document.createElement('button');
+            renameBtn.textContent = 'Rename';
+            renameBtn.addEventListener('click', () => {
+                const newName = prompt('New name:', save.name);
+                if (newName && newName.trim()) renameSave(save.id, newName.trim());
+            });
+            btnsDiv.appendChild(renameBtn);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.className = 'save-btn-delete';
+            deleteBtn.addEventListener('click', () => {
+                if (confirm(`Delete save "${save.name}"?`)) deleteSave(save.id);
+            });
+            btnsDiv.appendChild(deleteBtn);
+
+            entry.appendChild(btnsDiv);
+            listEl.appendChild(entry);
+        });
+    } catch (e) {
+        console.error('Error loading saves:', e);
+        listEl.innerHTML = '<p style="color: var(--term-red);">Error loading saves.</p>';
+    }
+}
+
+async function createNewSave(name) {
+    const statusEl = document.getElementById('save-modal-status');
+    if (!name || !name.trim()) { if (statusEl) statusEl.textContent = 'Enter a name.'; return; }
+    try {
+        const r = await fetch('/api/saves', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim() }),
+        });
+        if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.error || `HTTP ${r.status}`); }
+        const save = await r.json();
+        currentSaveId = save.id;
+        currentSaveName = save.name;
+        updateSaveDisplay();
+        if (statusEl) statusEl.textContent = `Created: ${save.name}`;
+        const nameInput = document.getElementById('save-name-input');
+        if (nameInput) nameInput.value = '';
+        renderSavesInModal();
+    } catch (e) {
+        console.error('Error creating save:', e);
+        if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+    }
+}
+
+async function loadSave(id) {
+    const statusEl = document.getElementById('save-modal-status');
+    try {
+        if (statusEl) statusEl.textContent = 'Loading...';
+        const r = await fetch(`/api/saves/${encodeURIComponent(id)}/load`, { method: 'POST' });
+        if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.error || `HTTP ${r.status}`); }
+        const result = await r.json();
+        const save = result.save;
+        currentSaveId = save.id;
+        currentSaveName = save.name;
+        updateSaveDisplay();
+        // Restore GM UI from save
+        const savedState = save.state || {};
+        const savedTokens = save.tokens || [];
+        const mapFilename = save.map_filename || '';
+        // Update currentState
+        currentState = Object.assign({}, savedState);
+        currentMapFilename = mapFilename;
+        tokens = savedTokens;
+        // Update map selector
+        if (mapSelect && mapFilename) {
+            const mapOption = Array.from(mapSelect.options).find(opt => opt.value === mapFilename);
+            if (mapOption) {
+                mapSelect.value = mapFilename;
+            }
+        }
+        // Reload GM map display
+        if (mapFilename) {
+            await loadMapDataForGM(mapFilename);
+        }
+        if (statusEl) statusEl.textContent = `Loaded: ${save.name}`;
+        renderSavesInModal();
+        closeSaveLoadModal();
+    } catch (e) {
+        console.error('Error loading save:', e);
+        if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+    }
+}
+
+async function quickSave() {
+    if (!currentSaveId) { openSaveLoadModal(); return; }
+    try {
+        const saveState = Object.assign({}, currentState);
+        delete saveState.original_map_path;
+        const r = await fetch(`/api/saves/${encodeURIComponent(currentSaveId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: saveState, tokens: tokens }),
+        });
+        if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.error || `HTTP ${r.status}`); }
+        const save = await r.json();
+        currentSaveName = save.name;
+        updateSaveDisplay();
+        console.log(`Quick-saved to: ${save.name}`);
+        // Brief flash feedback
+        const display = document.getElementById('current-save-display');
+        if (display) {
+            display.textContent = `SAVED: ${save.name}`;
+            setTimeout(() => updateSaveDisplay(), 1500);
+        }
+    } catch (e) {
+        console.error('Quick-save error:', e);
+        alert(`Quick-save failed: ${e.message}`);
+    }
+}
+
+async function renameSave(id, name) {
+    try {
+        const r = await fetch(`/api/saves/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (id === currentSaveId) {
+            const save = await r.json();
+            currentSaveName = save.name;
+            updateSaveDisplay();
+        }
+        renderSavesInModal();
+    } catch (e) {
+        console.error('Error renaming save:', e);
+    }
+}
+
+async function deleteSave(id) {
+    try {
+        const r = await fetch(`/api/saves/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (id === currentSaveId) {
+            currentSaveId = null;
+            currentSaveName = null;
+            updateSaveDisplay();
+        }
+        renderSavesInModal();
+    } catch (e) {
+        console.error('Error deleting save:', e);
+    }
+}
+
+function updateSaveDisplay() {
+    const display = document.getElementById('current-save-display');
+    if (!display) return;
+    if (currentSaveId && currentSaveName) {
+        display.textContent = `Active: ${currentSaveName}`;
+        display.style.color = 'var(--term-cyan)';
+    } else {
+        display.textContent = 'No save loaded';
+        display.style.color = 'var(--term-green-dim)';
+    }
 }
 
 // --- Helpers (Unchanged) ---
@@ -2583,7 +2863,7 @@ function handleDocumentMouseUpToken(event) {
         const svgPoint = { x: event.clientX - svgRect.left, y: event.clientY - svgRect.top };
         const relPoint = svgToRelativeCoords(svgPoint);
         if (relPoint) {
-            TokenShared.emitTokenMove(socket, currentSessionId, tokenId, relPoint.x, relPoint.y);
+            TokenShared.emitTokenMove(socket, tokenId, relPoint.x, relPoint.y);
         }
         draggingTokenId = null;
         draggingTokenStartSvg = null;
@@ -2633,7 +2913,7 @@ function deselectToken() {
 
 function handleDeleteToken() {
     if (!selectedTokenId) return;
-    TokenShared.emitTokenRemove(socket, currentSessionId, selectedTokenId);
+    TokenShared.emitTokenRemove(socket, selectedTokenId);
     deselectToken();
 }
 
@@ -2644,7 +2924,6 @@ function setupTokenContextPopupGM() {
         colorBtnEl: tokenColorButton,
         colorInputEl: tokenColorInput,
         getSocket: () => socket,
-        getSessionId: () => currentSessionId,
         getSelectedId: () => selectedTokenId,
         getTokens: () => tokens,
         onDismiss: () => deselectToken()

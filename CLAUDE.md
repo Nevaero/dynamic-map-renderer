@@ -12,7 +12,7 @@ A web-based TTRPG tool that lets a Game Master transform static map images into 
 
 - **GM interface** (`templates/index.html` + `static/js/gm.js`) — control panel for maps, filters, fog of war, tokens, view state
 - **Player view** (`templates/player.html` + `static/js/player.js`) — full-screen WebGL-rendered display with real-time sync
-- **Server** (`app.py`) — Flask app handling WebSocket comms, image compositing, config persistence
+- **Server** (`app.py` + `server/` package) — Flask app factory with modular routing, WebSocket comms, image compositing, config persistence
 - **Filters** (`filters/`) — GLSL shaders (CRT green, CRT amber, none) with tunable parameters
 - **Configs** (`configs/`) — per-map JSON auto-save of all state (filter params, fog polygons, view)
 
@@ -29,7 +29,18 @@ A web-based TTRPG tool that lets a Game Master transform static map images into 
 
 ## Directory Structure
 
-- `app.py` — main Flask application
+- `app.py` — slim entry point (creates app, runs server)
+- `server/` — backend package
+  - `__init__.py` — `create_app()` factory, registers blueprints + sockets
+  - `config.py` — paths, constants, folder creation, logging, LAN IP
+  - `state.py` — shared mutable globals (`current_state`, `current_tokens`, `current_save_id`)
+  - `filters.py` — filter loading from GLSL shader directories
+  - `helpers.py` — map config I/O, state builders, `merge_dicts`
+  - `map_gen.py` — fog-of-war compositing (`generate_player_map`, `generate_player_map_bytes`)
+  - `tunnel.py` — Cloudflare tunnel management
+  - `routes_core.py` — Blueprint: templates, file serving, filters, maps, config APIs
+  - `routes_saves.py` — Blueprint: SQLite save/load CRUD + auto-load
+  - `sockets.py` — all SocketIO event handlers
 - `templates/` — HTML templates (index.html for GM, player.html for player)
 - `static/js/gm.js` — GM interface logic
 - `static/js/player.js` — player view logic

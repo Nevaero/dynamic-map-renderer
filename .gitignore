@@ -4,6 +4,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+.claude/*
+.claude/settings.local.json
+
 # C extensions
 *build*/
 *dist*/
@@ -45,4 +48,5 @@ Thumbs.db
 
 # Cloudflare Tunnel binary (downloaded at build time)
 cloudflared.exe
-.claude/
+
+nul
