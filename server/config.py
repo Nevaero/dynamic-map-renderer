@@ -8,7 +8,9 @@ import secrets
 import socket
 
 # --- PyInstaller / dev path detection ---
-if getattr(sys, 'frozen', False):
+IS_PROD = getattr(sys, 'frozen', False)
+
+if IS_PROD:
     BUNDLE_DIR = sys._MEIPASS
     APP_ROOT = os.path.dirname(sys.executable)
 else:
@@ -22,7 +24,7 @@ FILTERS_FOLDER = os.path.join(APP_ROOT, 'filters')
 GENERATED_MAPS_FOLDER = os.path.join(APP_ROOT, 'generated_maps')
 
 # On first run of the packaged .exe, copy bundled seed data next to the executable
-if getattr(sys, 'frozen', False):
+if IS_PROD:
     import shutil
     for _folder_name in ('filters', 'maps', 'configs'):
         _src = os.path.join(BUNDLE_DIR, _folder_name)

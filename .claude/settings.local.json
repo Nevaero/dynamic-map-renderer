@@ -20,7 +20,8 @@
       "Bash(findstr:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nrefactor: Extract shared token code into token-shared.js, persist tokens across reloads\n\n- Extract duplicated token logic \\(socket emits, context popup, color swatches,\n  label input, utilities\\) from gm.js and player.js into token-shared.js IIFE\n- Both views now delegate to TokenShared.* for token operations\n- Remove ownership-based token cleanup on disconnect so tokens survive\n  page reloads \\(kept in server memory per session\\)\n- Anchor color picker input to contextual popup via CSS positioning\n- Use mousedown for popup outside-dismiss to prevent same-click race\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git commit:*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(git status:*)"
     ]
   }
 }

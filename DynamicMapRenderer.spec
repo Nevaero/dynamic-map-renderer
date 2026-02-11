@@ -13,6 +13,15 @@ _extra_binaries = []
 if os.path.isfile(_cloudflared_path):
     _extra_binaries.append((_cloudflared_path, '.'))
 
+# Bundle icon.ico if present
+_icon_path = os.path.join(app_root, 'icon.ico')
+_extra_datas = []
+if os.path.isfile(_icon_path):
+    _extra_datas.append((_icon_path, '.'))
+
+# Use icon.ico for the exe if present, otherwise None
+_exe_icon = _icon_path if os.path.isfile(_icon_path) else None
+
 a = Analysis(
     [os.path.join(app_root, 'app.py')],
     pathex=[app_root],
@@ -25,7 +34,7 @@ a = Analysis(
         (os.path.join(app_root, 'filters'),   'filters'),
         (os.path.join(app_root, 'maps'),      'maps'),
         (os.path.join(app_root, 'configs'),   'configs'),
-    ],
+    ] + _extra_datas,
     hiddenimports=[
         'flask',
         'flask_socketio',
@@ -43,8 +52,10 @@ a = Analysis(
         'server.map_gen',
         'server.tunnel',
         'server.routes_core',
+        'server.auth',
         'server.routes_saves',
         'server.sockets',
+        'webview',
     ],
     hookspath=[],
     hooksconfig={},
@@ -73,11 +84,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,            # Keep console visible so user sees server logs
+    console=False,           # Silent — no console window in production
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,               # Add an .ico file here if you have one
+    icon=_exe_icon,          # Sets the exe file icon + taskbar icon
 )

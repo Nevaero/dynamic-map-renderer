@@ -15,7 +15,7 @@ if errorlevel 1 (
 
 :: Install / upgrade build dependencies
 echo [1/4] Installing dependencies...
-pip install --upgrade pyinstaller flask flask-socketio pillow python-engineio python-socketio werkzeug
+pip install --upgrade pyinstaller flask flask-socketio pillow python-engineio python-socketio werkzeug pywebview
 if errorlevel 1 (
     echo ERROR: pip install failed.
     pause
@@ -58,6 +58,6 @@ echo   Output:  dist\DynamicMapRenderer.exe
 echo ============================================
 echo.
 echo Send that single .exe file to your friend.
-echo They just double-click it and a browser will open automatically.
+echo They just double-click it and a native GM window will open automatically.
 echo.
 pause

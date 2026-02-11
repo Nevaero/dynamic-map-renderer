@@ -6,13 +6,21 @@ import os
 import sys
 import time
 import threading
-import webbrowser
+
+import webview
 
 from server import create_app, socketio
 from server import config
-from server.config import cleanup_generated_maps
+from server.config import cleanup_generated_maps, IS_PROD
 from server.routes_saves import _auto_load_latest_save
 from server.tunnel import _find_cloudflared, _start_tunnel
+
+
+def resource_path(relative_path):
+    """Resolve a path to a bundled resource (PyInstaller) or local file."""
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative_path)
+
 
 # Create app at module level (PyInstaller needs it discoverable)
 app = create_app()
@@ -22,8 +30,7 @@ if __name__ == '__main__':
     cleanup_generated_maps()
     _auto_load_latest_save()
 
-    is_frozen = getattr(sys, 'frozen', False)
-    if not is_frozen:
+    if not IS_PROD:
         with app.app_context(): print("--- Registered URL Routes ---\n", app.url_map, "\n-----------------------------")
 
     print("------------------------------------------")
@@ -41,9 +48,8 @@ if __name__ == '__main__':
     print(f" GM View (this machine): {gm_url}")
     print(f" Player View (LAN):      http://{config.LAN_IP}:5000/player")
     print("------------------------------------------")
-    if is_frozen:
-        print(" (Close this window to stop the server)")
-        print("------------------------------------------")
+    print(" (Close the GM window to stop the server)")
+    print("------------------------------------------")
 
     # Start cloudflared tunnel in background
     if _find_cloudflared():
@@ -53,13 +59,28 @@ if __name__ == '__main__':
         print(" Cloudflare tunnel: unavailable (cloudflared.exe not found)")
     print("------------------------------------------")
 
-    # Auto-open browser after a short delay to let the server start
-    # Only open in the reloader child process (or when reloader is disabled)
-    # to avoid opening two tabs.
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or is_frozen:
-        def open_browser():
-            time.sleep(1.5)
-            webbrowser.open(gm_url)
-        threading.Thread(target=open_browser, daemon=True).start()
+    # Start Flask-SocketIO server in a daemon thread
+    server_thread = threading.Thread(
+        target=socketio.run,
+        args=(app,),
+        kwargs=dict(host='0.0.0.0', port=5000, use_reloader=False, debug=False, log_output=not IS_PROD),
+        daemon=True,
+    )
+    server_thread.start()
 
-    socketio.run(app, debug=not is_frozen, host='0.0.0.0', port=5000, use_reloader=not is_frozen)
+    # Wait briefly for the server to be ready
+    time.sleep(1)
+
+    # Resolve icon path (place icon.ico in the project root)
+    icon_path = resource_path('icon.ico')
+    icon = icon_path if os.path.isfile(icon_path) else None
+
+    # Launch pywebview window on main thread
+    webview.create_window(
+        'Dynamic Map Renderer — GM',
+        gm_url,
+        width=1280,
+        height=900,
+        min_size=(800, 600),
+    )
+    webview.start(icon=icon)
