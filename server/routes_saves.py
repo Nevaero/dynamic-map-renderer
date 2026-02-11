@@ -229,7 +229,7 @@ def get_save(save_id):
     return jsonify(data)
 
 
-@saves_bp.route('/api/saves/<save_id>', methods=['PUT'])
+@saves_bp.route('/api/saves/<save_id>', methods=['PUT', 'POST'])
 @gm_required
 def update_save(save_id):
     """Update save: rename via {name}, or overwrite state via {state, tokens}."""
@@ -329,6 +329,40 @@ def get_current_save_id():
         if data:
             name = data.get('name')
     return jsonify({"current_save_id": state.current_save_id, "current_save_name": name})
+
+
+def _save_on_shutdown():
+    """Persist current state to disk on shutdown. Never raises."""
+    try:
+        # 1. Save per-map JSON config
+        if state.current_state:
+            original = state.current_state.get('original_map_path', '')
+            if original:
+                map_filename = os.path.basename(original)
+                if map_filename:
+                    cfg = copy.deepcopy(state.current_state)
+                    cfg.pop('original_map_path', None)
+                    helpers.save_map_config(map_filename, cfg)
+                    logging.info(f"Shutdown: saved map config for {map_filename}")
+
+        # 2. Save SQLite save
+        if state.current_save_id and state.current_state:
+            existing = _read_save(state.current_save_id)
+            if existing:
+                save_state = copy.deepcopy(state.current_state)
+                save_state.pop('original_map_path', None)
+                # Normalize map_content_path to the file path for persistence
+                original = state.current_state.get('original_map_path', '')
+                if original:
+                    map_filename = os.path.basename(original)
+                    save_state['map_content_path'] = f"maps/{map_filename}" if map_filename else save_state.get('map_content_path')
+                existing['state'] = save_state
+                existing['tokens'] = copy.deepcopy(state.current_tokens) if state.current_tokens else []
+                existing['modified_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                _write_save(existing)
+                logging.info(f"Shutdown: saved SQLite save {state.current_save_id}")
+    except Exception as e:
+        logging.error(f"Shutdown save error: {e}", exc_info=True)
 
 
 def _auto_load_latest_save():

@@ -4,7 +4,16 @@
 
 import os
 import sys
+
+# In PyInstaller windowed mode (console=False), sys.stdout/stderr are None.
+# Redirect to devnull to prevent crashes from print()/logging calls.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+
 import time
+import socket
 import threading
 
 import webview
@@ -12,7 +21,7 @@ import webview
 from server import create_app, socketio
 from server import config
 from server.config import cleanup_generated_maps, IS_PROD
-from server.routes_saves import _auto_load_latest_save
+from server.routes_saves import _auto_load_latest_save, _save_on_shutdown
 from server.tunnel import _find_cloudflared, _start_tunnel
 
 
@@ -63,13 +72,19 @@ if __name__ == '__main__':
     server_thread = threading.Thread(
         target=socketio.run,
         args=(app,),
-        kwargs=dict(host='0.0.0.0', port=5000, use_reloader=False, debug=False, log_output=not IS_PROD),
+        kwargs=dict(host='0.0.0.0', port=5000, use_reloader=False, debug=False, log_output=not IS_PROD, allow_unsafe_werkzeug=True),
         daemon=True,
     )
     server_thread.start()
 
-    # Wait briefly for the server to be ready
-    time.sleep(1)
+    # Wait for the server to be ready (poll up to 10s)
+    for _ in range(100):
+        try:
+            s = socket.create_connection(('127.0.0.1', 5000), timeout=1)
+            s.close()
+            break
+        except Exception:
+            time.sleep(0.1)
 
     # Resolve icon path (place icon.ico in the project root)
     icon_path = resource_path('icon.ico')
@@ -84,3 +99,19 @@ if __name__ == '__main__':
         min_size=(800, 600),
     )
     webview.start(icon=icon)
+
+    # Window closed — persist any unsaved state, then force-exit
+    print("------------------------------------------")
+    print(" Shutting down — saving state...")
+    _save_on_shutdown()
+    print(" Shutdown complete.")
+    print("------------------------------------------")
+
+    # atexit handlers (e.g. _stop_tunnel) won't run with os._exit,
+    # so stop cloudflared explicitly before force-killing the process.
+    from server.tunnel import _stop_tunnel
+    _stop_tunnel()
+
+    # Force-exit: daemon Flask/SocketIO threads on Windows can keep the
+    # process alive indefinitely. os._exit() guarantees a clean kill.
+    os._exit(0)

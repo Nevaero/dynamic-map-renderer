@@ -717,6 +717,7 @@ function setupEventListeners() {
     if (playerPreviewToggle) playerPreviewToggle.addEventListener('click', togglePlayerPreview);
     if (playerPreviewClose) playerPreviewClose.addEventListener('click', togglePlayerPreview);
     setupPlayerPreviewResize();
+    window.addEventListener('beforeunload', handleBeforeUnload);
     console.log("Event listeners setup complete.");
 }
 
@@ -2481,6 +2482,42 @@ function debouncedAutoSave() {
         console.log("Debounce timer expired, saving.");
         _saveConfigurationInternal();
     }, DEBOUNCE_DELAY);
+}
+
+function handleBeforeUnload() {
+    // Clear pending debounce to avoid a stale save racing with this one
+    clearTimeout(debounceTimer);
+
+    // 1. Per-map config save via sendBeacon
+    if (currentMapFilename && currentState?.map_content_path) {
+        try {
+            const saveData = JSON.parse(JSON.stringify(currentState));
+            saveData.map_content_path = `maps/${currentMapFilename}`;
+            delete saveData.map_image_path;
+            if (saveData.filter_params) {
+                const textParams = ['backgroundImageFilename', 'defaultFontFamily', 'defaultTextSpeed', 'fontSize'];
+                for (const filterId in saveData.filter_params) {
+                    if (typeof saveData.filter_params[filterId] === 'object') {
+                        textParams.forEach(p => delete saveData.filter_params[filterId]?.[p]);
+                    }
+                }
+            }
+            saveData.fog_of_war = saveData.fog_of_war || { hidden_polygons: [] };
+            saveData.fog_of_war.hidden_polygons = saveData.fog_of_war.hidden_polygons || [];
+            const blob = new Blob([JSON.stringify(saveData)], { type: 'application/json' });
+            navigator.sendBeacon(`/api/config/${encodeURIComponent(currentMapFilename)}`, blob);
+        } catch (e) { console.warn('beforeunload config save error:', e); }
+    }
+
+    // 2. SQLite save via sendBeacon (only if dirty)
+    if (currentSaveId && _autoSaveDirty) {
+        try {
+            const saveState = Object.assign({}, currentState);
+            delete saveState.original_map_path;
+            const blob = new Blob([JSON.stringify({ state: saveState, tokens: tokens })], { type: 'application/json' });
+            navigator.sendBeacon(`/api/saves/${encodeURIComponent(currentSaveId)}`, blob);
+        } catch (e) { console.warn('beforeunload SQLite save error:', e); }
+    }
 }
 
 // --- Session/Player URL Display ---
