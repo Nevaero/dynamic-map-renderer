@@ -42,3 +42,7 @@ Thumbs.db
 
 # Optional: Log files
 *.log
+
+# Cloudflare Tunnel binary (downloaded at build time)
+cloudflared.exe
+.claude/
