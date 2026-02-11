@@ -70,6 +70,11 @@ let shapePreviewElement = null; // SVG polygon for live preview
 let debounceTimer = null;
 const DEBOUNCE_DELAY = 1500;
 
+// --- Throttled Send State ---
+let _pendingUpdate = null;
+let _sendThrottleTimer = null;
+const SEND_THROTTLE_MS = 150;
+
 // --- Token State ---
 let isTokenModeEnabled = false;
 let currentTokenLabel = 'A';
@@ -847,7 +852,7 @@ function handleControlChange(event) {
                 }
             }
         };
-        sendUpdate(payload);
+        throttledSendUpdate(payload);
         debouncedAutoSave();
     }
 }
@@ -866,7 +871,7 @@ function handleViewChange(event) {
                 [key]: value
             }
         };
-        sendUpdate(payload);
+        throttledSendUpdate(payload);
         debouncedAutoSave();
     }
 }
@@ -1320,7 +1325,7 @@ function handleDocumentMouseUpDrag(event) {
 
         // Send update
         commitPendingUndo();
-        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
         debouncedAutoSave();
         console.log("Polygon drag completed.");
 
@@ -1539,7 +1544,7 @@ function handleDocumentMouseUpVertex(event) {
         }
 
         commitPendingUndo();
-        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
         debouncedAutoSave();
         console.log("Vertex drag completed.");
 
@@ -1666,7 +1671,7 @@ function handleDocumentMouseUpResize(event) {
         }
 
         commitPendingUndo();
-        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
         debouncedAutoSave();
         console.log("Resize drag completed.");
 
@@ -1797,7 +1802,7 @@ function handleDocumentMouseUpEdge(event) {
         }
 
         commitPendingUndo();
-        sendUpdate({ fog_of_war: currentState.fog_of_war });
+        throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
         debouncedAutoSave();
         console.log("Edge resize drag completed.");
 
@@ -1944,7 +1949,7 @@ function handleDocumentMouseUpShape(event) {
     currentState.fog_of_war.hidden_polygons.push(newPolygon);
     drawSingleCompletedPolygon(newPolygon);
 
-    sendUpdate({ fog_of_war: currentState.fog_of_war });
+    throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
     debouncedAutoSave();
 
     cleanupShapePreview();
@@ -2102,7 +2107,7 @@ function completeCurrentPolygon() {
 
     // *** ADDED: Send update to backend/players ***
     console.log("Sending fog update after polygon completion.");
-    sendUpdate({
+    throttledSendUpdate({
         fog_of_war: currentState.fog_of_war
     });
 
@@ -2171,7 +2176,7 @@ function handleDeletePolygon() {
             const elementToRemove = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
             if (elementToRemove) elementToRemove.remove();
         }
-        sendUpdate({
+        throttledSendUpdate({
             fog_of_war: currentState.fog_of_war
         });
         debouncedAutoSave();
@@ -2207,7 +2212,7 @@ function setupFogColorPicker() {
                 const el = svgCompletedLayer.querySelector(`.fog-polygon-complete[data-polygon-id="${selectedPolygonId}"]`);
                 if (el) el.setAttribute('fill', newColor);
             }
-            sendUpdate({ fog_of_war: currentState.fog_of_war });
+            throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
             debouncedAutoSave();
         }
     });
@@ -2397,7 +2402,7 @@ function fogUndo() {
     currentState.fog_of_war = fogUndoStack.pop();
     deselectPolygon();
     drawExistingFogPolygons();
-    sendUpdate({ fog_of_war: currentState.fog_of_war });
+    throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
     debouncedAutoSave();
     console.log("Fog undo applied.");
 }
@@ -2408,12 +2413,42 @@ function fogRedo() {
     currentState.fog_of_war = fogRedoStack.pop();
     deselectPolygon();
     drawExistingFogPolygons();
-    sendUpdate({ fog_of_war: currentState.fog_of_war });
+    throttledSendUpdate({ fog_of_war: currentState.fog_of_war });
     debouncedAutoSave();
     console.log("Fog redo applied.");
 }
 
 // --- State Updates & Saving (Unchanged) ---
+function _deepMerge(target, source) {
+    for (const key in source) {
+        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+            target[key] = target[key] || {};
+            _deepMerge(target[key], source[key]);
+        } else {
+            target[key] = source[key];
+        }
+    }
+    return target;
+}
+
+function throttledSendUpdate(partialData) {
+    if (!_pendingUpdate) {
+        _pendingUpdate = {};
+    }
+    _deepMerge(_pendingUpdate, partialData);
+    if (!_sendThrottleTimer) {
+        _sendThrottleTimer = setTimeout(flushUpdate, SEND_THROTTLE_MS);
+    }
+}
+
+function flushUpdate() {
+    _sendThrottleTimer = null;
+    if (_pendingUpdate) {
+        sendUpdate(_pendingUpdate);
+        _pendingUpdate = null;
+    }
+}
+
 function sendUpdate(updateData) {
     console.log("Sending update:", JSON.stringify(updateData));
     if (!socket || !socket.connected) {

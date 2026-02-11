@@ -41,6 +41,11 @@ let draggingPlayerTokenOffset = null;
 let selectedPlayerTokenId = null;
 let playerTokenDragOccurred = false;
 
+// --- Lerp Transition State ---
+const LERP_SPEED = 12;           // exponential ease: ~200ms to 95% of target
+let targetUniforms = {};          // { uniformName: targetValue }
+let targetViewState = null;       // target camera state for lerping
+
 // --- Preview Mode ---
 const isPreviewMode = window.parent !== window;
 
@@ -174,7 +179,7 @@ async function handleStateUpdate(state) {
     console.log('[handleStateUpdate] Received state:', JSON.stringify(state));
     if (!state || typeof state !== 'object') { console.error("Invalid state received."); return; }
     displayStatus("Applying state..."); isRenderingPaused = false;
-    currentViewState = state.view_state || { center_x: 0.5, center_y: 0.5, scale: 1.0 };
+    const incomingViewState = state.view_state || { center_x: 0.5, center_y: 0.5, scale: 1.0 };
     const newFilterId = state.current_filter || 'none';
     const newContentPath = state.map_content_path || null; // Relative URL from backend
     console.log(`[handleStateUpdate] Processing: Path='${newContentPath}', Filter='${newFilterId}'`);
@@ -183,8 +188,9 @@ async function handleStateUpdate(state) {
 
     try {
         let shaderChanged = false; let shadersOk = true;
+        const filterChanged = newFilterId !== currentFilterId || !filterDefinitions[newFilterId]?.vertexShader;
         // 1. Update Shaders if needed... (condensed)
-        if (newFilterId !== currentFilterId || !filterDefinitions[newFilterId]?.vertexShader) {
+        if (filterChanged) {
             console.log(`Filter change/load: ${currentFilterId} -> ${newFilterId}`);
             shadersOk = await loadFilterShaders(newFilterId);
             if (!shadersOk) { /* Fallback */ material.vertexShader = getBasicVertexShader(); material.fragmentShader = getBasicFragmentShader(); currentFilterId = 'none_fallback'; shaderChanged = true; }
@@ -194,9 +200,42 @@ async function handleStateUpdate(state) {
                 currentFilterId = newFilterId;
             }
         }
-        // 2. Update Uniforms... (condensed)
+        // 2. Update Uniforms
         const filterConfig = filterDefinitions[currentFilterId];
-        if (shadersOk && filterConfig) { updateUniformsForMaterial(material, filterConfig, currentFilterParams); }
+        if (shadersOk && filterConfig) {
+            if (filterChanged) {
+                // Filter switched — apply uniforms instantly (no lerp)
+                updateUniformsForMaterial(material, filterConfig, currentFilterParams);
+                // Sync targetUniforms so the lerp loop doesn't fight
+                targetUniforms = {};
+                if (filterConfig.params) {
+                    for (const paramKey in filterConfig.params) {
+                        if (paramKey === 'backgroundImageFilename') continue;
+                        const uniformName = `u${paramKey.charAt(0).toUpperCase() + paramKey.slice(1)}`;
+                        const value = currentFilterParams[paramKey] ?? filterConfig.params[paramKey].value ?? null;
+                        if (typeof value === 'number' && isFinite(value)) {
+                            targetUniforms[uniformName] = value;
+                        }
+                    }
+                }
+            } else {
+                // Same filter — set targets for lerp, ensure uniforms exist
+                if (filterConfig.params) {
+                    for (const paramKey in filterConfig.params) {
+                        if (paramKey === 'backgroundImageFilename') continue;
+                        const uniformName = `u${paramKey.charAt(0).toUpperCase() + paramKey.slice(1)}`;
+                        const value = currentFilterParams[paramKey] ?? filterConfig.params[paramKey].value ?? null;
+                        if (typeof value === 'number' && isFinite(value)) {
+                            // Ensure uniform exists on material (first time)
+                            if (!material.uniforms[uniformName]) {
+                                material.uniforms[uniformName] = { value: value };
+                            }
+                            targetUniforms[uniformName] = value;
+                        }
+                    }
+                }
+            }
+        }
         else { cleanupUniforms(material, null); }
         if (shaderChanged) { material.needsUpdate = true; console.log("Shader material marked for update.");}
 
@@ -221,8 +260,16 @@ async function handleStateUpdate(state) {
         } else {
              planeMesh.visible = material.uniforms.mapTexture.value !== null;
         }
-        // 4. Update Camera
-        updateCameraView(currentViewState);
+        // 4. Update Camera — lerp to target instead of snapping
+        if (filterChanged || !targetViewState) {
+            // First load or filter switch — snap camera immediately
+            currentViewState = { ...incomingViewState };
+            updateCameraView(currentViewState);
+            targetViewState = { ...incomingViewState };
+        } else {
+            // Same filter — set lerp target, animate loop will interpolate
+            targetViewState = { ...incomingViewState };
+        }
         console.log("[handleStateUpdate] Update applied successfully."); displayStatus("");
     } catch (error) {
         console.error("[handleStateUpdate] Error applying state:", error);
@@ -237,10 +284,9 @@ function handleMapImageData(data) {
     console.log(`[map_image_data] Received base64 image: ${b64.length} chars`);
     if (!material || !planeMesh) { console.warn("[map_image_data] Material/mesh not ready."); return; }
 
-    // Revoke previous object URL
-    if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
-    // Dispose previous texture
-    if (material.uniforms.mapTexture?.value) { material.uniforms.mapTexture.value.dispose(); material.uniforms.mapTexture.value = null; }
+    // Keep old texture visible until the new one is ready (prevents flash)
+    const oldTexture = material.uniforms.mapTexture?.value;
+    const oldObjectUrl = currentObjectUrl;
 
     try {
         // Decode base64 to binary
@@ -255,7 +301,10 @@ function handleMapImageData(data) {
                 try {
                     const texture = new THREE.Texture(imageElement);
                     texture.needsUpdate = true;
+                    // Atomic swap: assign new texture, then dispose old
                     material.uniforms.mapTexture.value = texture;
+                    if (oldTexture) oldTexture.dispose();
+                    if (oldObjectUrl) URL.revokeObjectURL(oldObjectUrl);
                     if (imageElement.naturalWidth > 0 && imageElement.naturalHeight > 0) {
                         const textureAspect = imageElement.naturalWidth / imageElement.naturalHeight;
                         planeMesh.scale.set(textureAspect, 1.0, 1.0);
@@ -267,7 +316,11 @@ function handleMapImageData(data) {
                 } catch (e) { console.error("[map_image_data] Error creating texture:", e); }
             },
             undefined,
-            (err) => { console.error("[map_image_data] ImageLoader failed:", err); displayStatus("ERROR loading map image."); }
+            (err) => {
+                // Load failed — restore old object URL so it can be cleaned up next time
+                currentObjectUrl = oldObjectUrl;
+                console.error("[map_image_data] ImageLoader failed:", err); displayStatus("ERROR loading map image.");
+            }
         );
     } catch (e) {
         console.error("[map_image_data] Error processing data:", e);
@@ -393,7 +446,28 @@ function onWindowResize() {
  }
 function animate() {
     requestAnimationFrame(animate); if (isRenderingPaused || !renderer || !scene || !camera) return;
+    const dt = clock.getDelta();
     const elapsedTime = clock.getElapsedTime(); if (material?.uniforms?.time) { material.uniforms.time.value = elapsedTime; }
+
+    // Lerp shader uniforms toward targets
+    const lerpFactor = 1 - Math.exp(-LERP_SPEED * dt);
+    if (material) {
+        for (const name in targetUniforms) {
+            const u = material.uniforms[name];
+            if (u && typeof u.value === 'number') {
+                u.value += (targetUniforms[name] - u.value) * lerpFactor;
+            }
+        }
+    }
+
+    // Lerp camera toward target view state
+    if (targetViewState && currentViewState) {
+        currentViewState.center_x += (targetViewState.center_x - currentViewState.center_x) * lerpFactor;
+        currentViewState.center_y += (targetViewState.center_y - currentViewState.center_y) * lerpFactor;
+        currentViewState.scale += (targetViewState.scale - currentViewState.scale) * lerpFactor;
+        updateCameraView(currentViewState);
+    }
+
     try { renderer.render(scene, camera); } catch (e) { console.error("Render loop error:", e); displayStatus(`ERROR rendering.`); isRenderingPaused = true; }
     if (!isPreviewMode) renderPlayerTokens();
  }
